@@ -19,18 +19,20 @@ fn criterion_benchmark(c: &mut Criterion) {
     let connector = MakeTlsConnector::new(builder.build());
 
     let mut group = c.benchmark_group("connections");
-    group.sample_size(1000);
-    group.measurement_time(Duration::from_secs(60));
+    //group.sample_mode(SamplingMode::Flat);
+    //group.sample_size(200);
+    //group.measurement_time(Duration::from_secs(60));
+
     // 1
     let connection = "host=192.168.66.201 port=5432 sslmode=disable user=postgres password=postgres";
     group.bench_function("public-nic-notls", |b| b.iter(|| notls_connection(connection)));
-    // 5
+    // 2
     let connection = "host=192.168.66.201 port=5432 sslmode=require user=postgres password=postgres";
     group.bench_function("public-nic-tls", |b| b.iter(|| { let connector = connector.clone(); tls_connection(connection, connector)}));
-    // 6
+    // 3
     let connection = "host=192.168.66.201 port=6432 sslmode=disable user=postgres password=postgres";
     group.bench_function("pgbouncer-notls", |b| b.iter(|| notls_connection(connection)));
-    // 7
+    // 4
     let connection = "host=192.168.66.201 port=6432 sslmode=require user=postgres password=postgres";
     group.bench_function("pgbouncer-tls", |b| b.iter(|| { let connector = connector.clone(); tls_connection(connection, connector)}));
 
