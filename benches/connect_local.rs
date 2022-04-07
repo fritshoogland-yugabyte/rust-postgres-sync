@@ -1,20 +1,27 @@
+#[allow(unused_imports)]
 use std::time::Duration;
 use criterion::{criterion_group, criterion_main, Criterion};
 use postgres_openssl::MakeTlsConnector;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use rust_postgres_sync::*;
 
+const FULL_PATH_CA_CERT: &str = "/tmp/ca.cert";
+
+#[allow(dead_code)]
 fn notls_connection(url: &str) {
     let _c = crate::create_notls_connection(url);
 }
+
+#[allow(dead_code)]
 fn tls_connection(url: &str, connection: MakeTlsConnector) {
     let _c = crate::create_tls_connection(url, connection);
 }
 
+
 fn criterion_benchmark(c: &mut Criterion) {
 
     let mut builder = SslConnector::builder(SslMethod::tls()).expect("unable to create sslconnector builder");
-    builder.set_ca_file("/tmp/ca.cert").expect("unable to load ca.cert");
+    builder.set_ca_file(FULL_PATH_CA_CERT).expect("unable to load ca.cert");
     builder.set_verify(SslVerifyMode::NONE);
     let connector = MakeTlsConnector::new(builder.build());
 
