@@ -1,6 +1,6 @@
 #[allow(unused_imports)]
 use std::time::Duration;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion, SamplingMode::Flat};
 use postgres_openssl::MakeTlsConnector;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use rust_postgres_sync::*;
@@ -26,8 +26,10 @@ fn criterion_benchmark(c: &mut Criterion) {
     let connector = MakeTlsConnector::new(builder.build());
 
     let mut group = c.benchmark_group("connections");
-    group.sample_size(1000);
-    group.measurement_time(Duration::from_secs(60));
+    group.sampling_mode(Flat);
+
+    //group.sample_size(1000);
+    //group.measurement_time(Duration::from_secs(60));
     // 1
     let connection = "host=/tmp sslmode=disable user=postgres password=postgres";
     group.bench_function("socket", |b| b.iter(|| notls_connection(connection)));
