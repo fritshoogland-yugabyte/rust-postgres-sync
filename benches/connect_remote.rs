@@ -3,7 +3,8 @@ use std::time::Duration;
 use criterion::{criterion_group, criterion_main, Criterion, SamplingMode::Flat};
 use postgres_openssl::MakeTlsConnector;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
-use rust_postgres_sync::*;
+use postgres::{Client, NoTls};
+//use ysql_bench::*;
 
 const FULL_PATH_CA_CERT: &str = "/tmp/ca.cert";
 
@@ -17,12 +18,22 @@ fn tls_connection(url: &str, connection: MakeTlsConnector) {
     let _c = crate::create_tls_connection(url, connection);
 }
 
+pub fn create_tls_connection(url: &str, connection: MakeTlsConnector) -> postgres::Client {
+    let connection = Client::connect(url, connection).expect("failed to create tls postgres connection");
+    connection
+}
+
+pub fn create_notls_connection(url: &str) -> Client {
+    let connection = Client::connect(url, NoTls).expect("failed to create notls postgres connection");
+    connection
+}
+
 fn criterion_benchmark(c: &mut Criterion) {
 
-    let mut builder = SslConnector::builder(SslMethod::tls()).expect("unable to create sslconnector builder");
-    builder.set_ca_file(FULL_PATH_CA_CERT).expect("unable to load ca.cert");
-    builder.set_verify(SslVerifyMode::NONE);
-    let connector = MakeTlsConnector::new(builder.build());
+    //let mut builder = SslConnector::builder(SslMethod::tls()).expect("unable to create sslconnector builder");
+    //builder.set_ca_file(FULL_PATH_CA_CERT).expect("unable to load ca.cert");
+    //builder.set_verify(SslVerifyMode::NONE);
+    //let connector = MakeTlsConnector::new(builder.build());
 
     let mut group = c.benchmark_group("connections");
     group.sampling_mode(Flat);
@@ -30,11 +41,11 @@ fn criterion_benchmark(c: &mut Criterion) {
     //group.measurement_time(Duration::from_secs(60));
 
     // 1
-    //let connection = "host=192.168.66.80 port=5433 sslmode=disable user=yugabyte password=yugabyte";
-    //group.bench_function("public-nic-notls", |b| b.iter(|| notls_connection(connection)));
+    let connection = "host=192.168.66.80 port=5433 sslmode=disable user=yugabyte password=yugabyte";
+    group.bench_function("public-nic-notls", |b| b.iter(|| notls_connection(connection)));
     // 2
-    let connection = "host=192.168.66.80 port=5433 sslmode=require user=yugabyte password=yugabyte";
-    group.bench_function("public-nic-tls", |b| b.iter(|| { let connector = connector.clone(); tls_connection(connection, connector)}));
+    //let connection = "host=192.168.66.80 port=5433 sslmode=require user=yugabyte password=yugabyte";
+    //group.bench_function("public-nic-tls", |b| b.iter(|| { let connector = connector.clone(); tls_connection(connection, connector)}));
     /*
     // 3
     let connection = "host=192.168.66.80 port=6432 sslmode=disable user=postgres password=postgres";

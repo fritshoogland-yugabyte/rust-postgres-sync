@@ -3,7 +3,8 @@ use std::time::Duration;
 use criterion::{criterion_group, criterion_main, Criterion, SamplingMode::Flat};
 use postgres_openssl::MakeTlsConnector;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
-use rust_postgres_sync::*;
+use postgres::{Client, NoTls};
+//use ysql_bench::*;
 
 const FULL_PATH_CA_CERT: &str = "/tmp/ca.cert";
 
@@ -17,6 +18,15 @@ fn tls_connection(url: &str, connection: MakeTlsConnector) {
     let _c = crate::create_tls_connection(url, connection);
 }
 
+pub fn create_tls_connection(url: &str, connection: MakeTlsConnector) -> postgres::Client {
+    let connection = Client::connect(url, connection).expect("failed to create tls postgres connection");
+    connection
+}
+
+pub fn create_notls_connection(url: &str) -> Client {
+    let connection = Client::connect(url, NoTls).expect("failed to create notls postgres connection");
+    connection
+}
 
 fn criterion_benchmark(c: &mut Criterion) {
 
