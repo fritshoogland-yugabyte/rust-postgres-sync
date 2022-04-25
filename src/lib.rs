@@ -26,6 +26,25 @@ enum PooledPgConnection {
 }
 */
 
+macro_rules! retry {
+    ($f:expr) => {{
+        let mut retries = 3;
+        loop {
+            let result = $f();
+            if results.is_ok() {
+                break result;
+            }
+            if retries > 0 {
+                retries -= 1;
+                print!(".");
+                thread::sleep(time::Duration::from_secs(5));
+                continue;
+            }
+        }
+        break result;
+    }};
+}
+
 pub fn run(
     #[allow(unused_variables)]
     cacert_file: &str,
@@ -78,15 +97,15 @@ pub fn run(
                     let connection = connection_pool.get().unwrap();
                     run_show_rowsize(connection);
                 }
-                println!("wallclock (s)   : {:12.6}", copy_time as f64 / 1000000.0);
-                println!("tot q time (s)  : {:12.6}", query_time as f64 / 1000000.0);
+                println!("wallclock time  : {:12.6} sec", copy_time as f64 / 1000000.0);
+                println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/copy_time as f64)*100.0);
                 println!("rows per thread : {:12}", rows);
                 println!("threads         : {:12}", threads);
                 println!("batch           : {:12}", batch_size);
                 println!("total rows      : {:12}", rows * threads);
                 println!("nontransactional: {:>12}", nontransactional);
-                println!("w tm/row (us)   : {:12.6}", copy_time as f64 / (rows * threads).to_f64().unwrap());
-                println!("q tm/row (us)   : {:12.6}", query_time as f64 / (rows * threads).to_f64().unwrap());
+                println!("wallclock tm/row: {:12.6} us", copy_time as f64 / (rows * threads).to_f64().unwrap());
+                println!("db tm/row       : {:12.6} us", query_time as f64 / (rows * threads).to_f64().unwrap());
                 if print_histogram {
                     println!("histogram is per batch ({} rows)", batch_size);
                     println!("{}", histogram);
@@ -125,15 +144,15 @@ pub fn run(
                     let connection = connection_pool.get().unwrap();
                     run_show_rowsize(connection);
                 }
-                println!("wallclock (s)   : {:12.6}", insert_time as f64 / 1000000.0);
-                println!("tot q time (s)  : {:12.6}", query_time as f64 / 1000000.0);
+                println!("wallclock time  : {:12.6} sec", insert_time as f64 / 1000000.0);
+                println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/insert_time as f64)*100.0);
                 println!("rows per thread : {:12}", rows);
                 println!("threads         : {:12}", threads);
                 println!("batch           : {:12}", batch_size);
                 println!("total rows      : {:12}", rows * threads);
                 println!("nontransactional: {:>12}", nontransactional);
-                println!("w tm/row (us)   : {:12.6}", insert_time as f64 / (rows * threads).to_f64().unwrap());
-                println!("q tm/row (us)   : {:12.6}", query_time as f64 / (rows * threads).to_f64().unwrap());
+                println!("wallclock tm/row: {:12.6} us", insert_time as f64 / (rows * threads).to_f64().unwrap());
+                println!("db tm/row       : {:12.6} us", query_time as f64 / (rows * threads).to_f64().unwrap());
                 if print_histogram {
                     println!("histogram is per batch ({} rows)", batch_size);
                     println!("{}", histogram);
@@ -172,15 +191,15 @@ pub fn run(
                     let connection = connection_pool.get().unwrap();
                     run_show_rowsize(connection);
                 }
-                println!("wallclock (s)   : {:12.6}", proc_time as f64 / 1000000.0);
-                println!("tot q time (s)  : {:12.6}", query_time as f64 / 1000000.0);
+                println!("wallclock time  : {:12.6} sec", proc_time as f64 / 1000000.0);
+                println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/proc_time as f64)*100.0);
                 println!("rows per thread : {:12}", rows);
                 println!("threads         : {:12}", threads);
                 println!("batch           : {:12}", batch_size);
                 println!("total rows      : {:12}", rows * threads);
                 println!("nontransactional: {:>12}", nontransactional);
-                println!("w tm/row (us)   : {:12.6}", proc_time as f64 / (rows * threads).to_f64().unwrap());
-                println!("q tm/row (us)   : {:12.6}", query_time as f64 / (rows * threads).to_f64().unwrap());
+                println!("wallclock tm/row: {:12.6} us", proc_time as f64 / (rows * threads).to_f64().unwrap());
+                println!("db tm/row       : {:12.6} us", query_time as f64 / (rows * threads).to_f64().unwrap());
             },
             &_ => println!("unknown operation: {}", operation),
         }
@@ -380,7 +399,7 @@ pub fn run_insert_prepared_10(
 ) -> Vec<u64> {
     let mut query_latencies: Vec<u64> = Vec::new();
     let start_id = rows * thread_id;
-    let end_id = start_id + rows;
+    let end_id = start_id + rows - 1;
 
     if nontransactional {
         connection.simple_query("set yb_disable_transactional_writes=on").expect("error in setting yb_disable_transactional_writes to on");
@@ -391,10 +410,10 @@ pub fn run_insert_prepared_10(
     let base_insert = "insert into test_table (id, f1, f2, f3, f4) values";
     let mut fields = String::from("");
     for fields_nr in 0..values_batch {
-        fields.push_str(format!("(${}, ${}, ${}, ${}, ${}),", (fields_nr*5)+1, (fields_nr*5)+2, (fields_nr*5)+3, (fields_nr*5)+4, (fields_nr*5)+5 ).as_str());
+        fields.push_str(format!("(${}, ${}, ${}, ${}, ${}),", (fields_nr*5)+1,(fields_nr*5)+2,(fields_nr*5)+3,(fields_nr*5)+4,(fields_nr*5)+5).as_str());
     }
     fields.pop();
-    let statement = format!("{} {}", base_insert, fields);
+    let statement = format!("{} {}", &base_insert, fields);
     let statement = connection.prepare(statement.as_str()).unwrap();
     for nr in (start_id..end_id).step_by(values_batch.try_into().unwrap()) {
         let mut row_values_i32: Vec<i32>= Vec::new();
@@ -402,23 +421,41 @@ pub fn run_insert_prepared_10(
         let mut values: Vec<&(dyn ToSql + Sync)> = Vec::new();
         for value_nr in 0..values_batch {
             // build a vector with field values
-            row_values_i32.push(nr + value_nr + 1);
-            row_values_string.push(random_characters(text_fields_length));
-            row_values_string.push(random_characters(text_fields_length));
-            row_values_string.push(random_characters(text_fields_length));
-            row_values_string.push(random_characters(text_fields_length));
+            if nr + value_nr <= end_id {
+                row_values_i32.push(nr + value_nr);
+                row_values_string.push(random_characters(text_fields_length));
+                row_values_string.push(random_characters(text_fields_length));
+                row_values_string.push(random_characters(text_fields_length));
+                row_values_string.push(random_characters(text_fields_length));
+            }
         }
         for value_nr in 0..values_batch {
             // build a ToSql vector with references to the field values
-            values.push(&row_values_i32[value_nr.to_usize().unwrap()] );
-            values.push(&row_values_string[((value_nr*4)+0).to_usize().unwrap()] );
-            values.push(&row_values_string[((value_nr*4)+1).to_usize().unwrap()] );
-            values.push(&row_values_string[((value_nr*4)+2).to_usize().unwrap()] );
-            values.push(&row_values_string[((value_nr*4)+3).to_usize().unwrap()] );
+            if nr + value_nr <= end_id {
+                values.push(&row_values_i32[value_nr.to_usize().unwrap()]);
+                values.push(&row_values_string[((value_nr * 4) + 0).to_usize().unwrap()]);
+                values.push(&row_values_string[((value_nr * 4) + 1).to_usize().unwrap()]);
+                values.push(&row_values_string[((value_nr * 4) + 2).to_usize().unwrap()]);
+                values.push(&row_values_string[((value_nr * 4) + 3).to_usize().unwrap()]);
+            }
         }
 
         let query_start_time = Instant::now();
-        connection.query( &statement, &values[..]).expect("error in performing execution of dynamically created insert");
+        // if the batch length makes the last batch to insert shorter, a custom non-prepared statement is created
+        // values batch * 5 fields
+        if values.len() < (values_batch*5).try_into().unwrap() {
+            // custom execution for the last batch with a lower number of values
+            let mut fields = String::from("");
+            for fields_nr in 0..(values.len()/5) {
+                fields.push_str(format!("(${}, ${}, ${}, ${}, ${}),", (fields_nr*5)+1, (fields_nr*5)+2, (fields_nr*5)+3, (fields_nr*5)+4, (fields_nr*5)+5 ).as_str());
+            }
+            fields.pop();
+            let statement = format!("{} {}", base_insert, fields);
+            connection.query(&statement, &values).expect("error in performing of execution of last batch");
+        } else {
+            // this is the regular execution of the prepared statement
+            connection.query( &statement, &values[..]).expect("error in performing execution of dynamically created insert");
+        }
         query_latencies.push(query_start_time.elapsed().as_micros().to_u64().unwrap());
     }
     query_latencies
@@ -434,7 +471,7 @@ pub fn run_insert_copy(
 ) -> Vec<u64> {
     let mut query_latencies: Vec<u64> = Vec::new();
     let start_id = rows * thread_id;
-    let end_id = start_id + rows;
+    let end_id = start_id + rows - 1;
 
     if nontransactional {
         connection.simple_query("set yb_disable_transactional_writes=on").expect("error in setting yb_disable_transactional_writes to on");
@@ -446,7 +483,9 @@ pub fn run_insert_copy(
     for nr in (start_id..end_id).step_by(values_batch.try_into().unwrap()) {
         let mut row = String::from("");
         for value_nr in 0..values_batch {
-            row.push_str(format!("{}\t{}\t{}\t{}\t{}\n", nr + value_nr + 1, random_characters(text_fields_length), random_characters(text_fields_length), random_characters(text_fields_length), random_characters(text_fields_length)).as_str());
+            if nr + value_nr <= end_id {
+                row.push_str(format!("{}\t{}\t{}\t{}\t{}\n", nr + value_nr, random_characters(text_fields_length), random_characters(text_fields_length), random_characters(text_fields_length), random_characters(text_fields_length)).as_str());
+            }
         }
         rows_vec.push(row);
     }
