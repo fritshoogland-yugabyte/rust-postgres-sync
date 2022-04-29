@@ -62,6 +62,7 @@ pub fn run(
 
     let connection = connection_pool.get().unwrap();
     run_create_table(connection, tablets);
+    run_create_procedure(connection);
 
     for operation in operations.split(",") {
         match operation {
@@ -262,7 +263,12 @@ fn run_show_rowsize(mut connection: PooledConnection<PostgresConnectionManager<N
 
 #[allow(dead_code)]
 fn run_create_procedure(mut connection: PooledConnection<PostgresConnectionManager<NoTls>> ) {
-    let sql_statement = "
+    let sql_statement = "select count(*) from pg_proc where proname = 'load_test' and prolang = (select oid from pg_language where lanname = 'plpgsql') and prokind = 'p'";
+    let row = connection.query_one(sql_statement, &[]).expect("error during select for validating procedure load_test existence via pg_proc");
+    let val: i32 = row.get(0);
+    if val == 0 {
+        println!(">> create load_test procedure");
+        let sql_statement = "
 create or replace procedure load_test ( rows int, field_length int, commit_batch int, run_thread_nr int default 1)
 language plpgsql as $$
 declare
@@ -298,7 +304,8 @@ begin
   end if;
 end $$;
 ";
-    connection.simple_query(sql_statement).unwrap();
+        connection.simple_query(sql_statement).unwrap();
+    }
 }
 
 #[allow(dead_code)]
