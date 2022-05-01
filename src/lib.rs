@@ -13,19 +13,9 @@ use postgres::types::ToSql;
 use num_traits::cast::ToPrimitive;
 use std::io::Write;
 
-//const FULL_PATH_CA_CERT: &str = "/tmp/ca.cert";
-//const LOOP_NR: i32 = 100000;
-//const PG_URL: &str = "host=192.168.66.80,192.168.66.81,192.168.66.82 port=5433 sslmode=disable user=yugabyte password=yugabyte";
 const PG_URL: &str = "host=192.168.66.80 port=5434 sslmode=disable user=yugabyte password=yugabyte";
-//const FIELD_LENGTH: i32 = 100;
 
 /*
-enum PooledPgConnection {
-    PooledConnection<PostgresConnectionManager<NoTls>>,
-    PooledConnection<PostgresConnectionManager<MakeTlsConnector>>,
-}
-*/
-
 macro_rules! retry {
     ($f:expr) => {{
         let mut retries = 3;
@@ -44,9 +34,9 @@ macro_rules! retry {
         break result;
     }};
 }
+ */
 
 pub fn run(
-    #[allow(unused_variables)]
     cacert_file: &str,
     text_fields_length: i32,
     batch_size: i32,
@@ -57,11 +47,13 @@ pub fn run(
     show_rowsize: bool,
     operations: &str,
     tablets: i32,
+    no_prepared: bool,
 ) {
-    let connection_pool = create_pool_nossl(PG_URL, threads);
+    let connection_pool = create_pool(PG_URL, threads, cacert_file);
 
     let connection = connection_pool.get().unwrap();
     run_create_table(connection, tablets);
+    let connection = connection_pool.get().unwrap();
     run_create_procedure(connection);
 
     for operation in operations.split(",") {
@@ -129,7 +121,7 @@ pub fn run(
                         let connection = pool.get().unwrap();
                         let tx_insert = tx_insert.clone();
                         s.spawn(move |_| {
-                            let latencies = run_insert_prepared_10(connection, rows, batch_size, thread_id, nontransactional, text_fields_length);
+                            let latencies = run_insert(connection, rows, batch_size, thread_id, nontransactional, text_fields_length, no_prepared);
                             tx_insert.send(latencies).unwrap();
                         });
                     }
@@ -152,6 +144,7 @@ pub fn run(
                 println!("batch           : {:12}", batch_size);
                 println!("total rows      : {:12}", rows * threads);
                 println!("nontransactional: {:>12}", nontransactional);
+                println!("no_prepared     : {:>12}", no_prepared);
                 println!("wallclock tm/row: {:12.6} us", insert_time as f64 / (rows * threads).to_f64().unwrap());
                 println!("db tm/row       : {:12.6} us", query_time as f64 / (rows * threads).to_f64().unwrap());
                 if print_histogram {
@@ -205,64 +198,28 @@ pub fn run(
             &_ => println!("unknown operation: {}", operation),
         }
     }
-    /*
-    run_insert(connection);
-    let connection = connection_pool.clone();
-    run_drop_table(connection);
-    let connection = connection_pool.clone();
-    run_create_table(connection);
-    let connection = connection_pool.clone();
-    run_insert_prepared(connection);
-    let connection = connection_pool.clone();
-     */
-    /*
-    let connection = connection_pool.clone();
-    run_insert_prepared_10(connection, 1_000_000, 500, 1 );
-     */
-    /*
-    let connection = connection_pool.clone();
-    run_truncate(connection);
-    let connection = connection_pool.clone();
-    run_insert_copy(connection, 1_000_000, 2_000 ,1 );
-     */
-    /*
-    let connection = connection_pool.clone();
-    run_truncate(connection);
-    let connection = connection_pool.clone();
-    run_procedure(connection, 1_000_000, 1_000_000 ,1 );
-     */
-
-    /*
-    let connection = connection_pool.clone();
-    run_create_table(connection);
-    let connection = connection_pool.clone();
-    run_insert_copy(connection, 100_000, 100_000 ,1 );
-    let connection = connection_pool.clone();
-    run_drop_table(connection);
-     */
 }
 
-fn run_create_table(mut connection: PooledConnection<PostgresConnectionManager<NoTls>>, tablets: i32) {
+fn run_create_table(mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, tablets: i32) {
     let sql_statement = format!("create table if not exists test_table( id int primary key, f1 text, f2 text, f3 text, f4 text) split into {} tablets", tablets);
     connection.simple_query(&sql_statement).expect("error during create table if not exists test_table");
 }
 
-fn run_truncate(mut connection: PooledConnection<PostgresConnectionManager<NoTls>>) {
+fn run_truncate(mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>) {
     let sql_statement = "truncate table test_table";
     connection.simple_query(sql_statement).expect("error during truncate");
     println!(">> truncate table");
 }
 
-fn run_show_rowsize(mut connection: PooledConnection<PostgresConnectionManager<NoTls>>) {
+fn run_show_rowsize(mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>) {
     let sql_statement = "select case when exists (select * from test_table limit 1) then pg_column_size(test_table.*) else 0 end from test_table limit 1";
     let row = connection.query_one(sql_statement, &[]).expect("error during select for table size");
-    let val: i32 = row.get(0);
+    let val: i64 = row.get(0);
     println!("row size        : {:12} bytes", val);
 
 }
 
-#[allow(dead_code)]
-fn run_create_procedure(mut connection: PooledConnection<PostgresConnectionManager<NoTls>> ) {
+fn run_create_procedure(mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>> ) {
     let sql_statement = "select count(*) from pg_proc where proname = 'load_test' and prolang = (select oid from pg_language where lanname = 'plpgsql') and prokind = 'p'";
     let row = connection.query_one(sql_statement, &[]).expect("error during select for validating procedure load_test existence via pg_proc");
     let val: i32 = row.get(0);
@@ -308,101 +265,14 @@ end $$;
     }
 }
 
-#[allow(dead_code)]
-fn run_drop_table(mut connection: PooledConnection<PostgresConnectionManager<NoTls>>) {
-    let sql_statement = "drop table test_table";
-    connection.simple_query(sql_statement).unwrap();
-}
-
-pub fn run_insert(mut connection: PooledConnection<PostgresConnectionManager<NoTls>>, rows: i32, text_fields_length: i32) {
-    println!("=== run_insert ===");
-    let mut histogram = Histogram::with_buckets(10);
-    let overall_start_time = Instant::now();
-    let mut overall_query_time: u128 = 0;
-    for nr in 1..rows {
-        let query_start_time = Instant::now();
-        connection.execute("insert into test_table (id, f1, f2, f3, f4) values ($1, $2, $3, $4, $5)",
-            &[
-            &nr,
-            &random_characters(text_fields_length),
-            &random_characters(text_fields_length),
-            &random_characters(text_fields_length),
-            &random_characters(text_fields_length)
-            ]
-        ).unwrap();
-        histogram.add(query_start_time.elapsed().as_micros().try_into().unwrap());
-        overall_query_time += query_start_time.elapsed().as_micros()
-    }
-    let overall_time = overall_start_time.elapsed().as_micros();
-    println!("total time (s) : {:12.6}", overall_time as f64/1000000.0);
-    println!("total query (s): {:12.6} {:5.2}%", overall_query_time as f64/1000000.0, overall_query_time as f64/overall_time as f64*100.0);
-    println!("{}", histogram);
-    println!("=== run_insert ===");
-}
-
-pub fn run_insert_prepared(mut connection: PooledConnection<PostgresConnectionManager<NoTls>>, rows: i32, text_fields_length: i32) {
-    println!("=== run_insert_prepared ===");
-    let mut histogram = Histogram::with_buckets(10);
-    let overall_start_time = Instant::now();
-    let mut overall_query_time: u128 = 0;
-    let statement = connection.prepare("insert into test_table (id, f1, f2, f3, f4) values ($1, $2, $3, $4, $5)").unwrap();
-    for nr in 1..rows {
-        let query_start_time = Instant::now();
-        connection.query( &statement,
-                           &[
-                               &nr,
-                               &random_characters(text_fields_length),
-                               &random_characters(text_fields_length),
-                               &random_characters(text_fields_length),
-                               &random_characters(text_fields_length)
-                           ]
-        ).unwrap();
-        histogram.add(query_start_time.elapsed().as_micros().try_into().unwrap());
-        overall_query_time += query_start_time.elapsed().as_micros()
-    }
-    let overall_time = overall_start_time.elapsed().as_micros();
-    println!("total query (s): {:12.6} {:5.2}%", overall_query_time as f64/1000000.0, overall_query_time as f64/overall_time as f64*100.0);
-    println!("{}", histogram);
-    println!("=== run_insert_prepared ===");
-}
-
-pub fn run_insert_prepared_2(mut connection: PooledConnection<PostgresConnectionManager<NoTls>>, rows: i32, text_fields_length: i32) {
-    println!("=== run_insert_prepared_2 ===");
-    let mut histogram = Histogram::with_buckets(10);
-    let overall_start_time = Instant::now();
-    let mut overall_query_time: u128 = 0;
-    let statement = connection.prepare("insert into test_table (id, f1, f2, f3, f4) values ($1, $2, $3, $4, $5), ($6, $7, $8, $9, $10)").unwrap();
-    for nr in (1..rows).step_by(2) {
-        let query_start_time = Instant::now();
-        connection.query( &statement,
-                          &[
-                              &nr,
-                              &random_characters(text_fields_length),
-                              &random_characters(text_fields_length),
-                              &random_characters(text_fields_length),
-                              &random_characters(text_fields_length),
-                              &(&nr+1),
-                              &random_characters(text_fields_length),
-                              &random_characters(text_fields_length),
-                              &random_characters(text_fields_length),
-                              &random_characters(text_fields_length)
-                          ]
-        ).unwrap();
-        histogram.add(query_start_time.elapsed().as_micros().try_into().unwrap());
-        overall_query_time += query_start_time.elapsed().as_micros()
-    }
-    let overall_time = overall_start_time.elapsed().as_micros();
-    println!("total query (s): {:12.6} {:5.2}%", overall_query_time as f64/1000000.0, overall_query_time as f64/overall_time as f64*100.0);
-    println!("{}", histogram);
-    println!("=== run_insert_prepared_2 ===");
-}
-pub fn run_insert_prepared_10(
-    mut connection: PooledConnection<PostgresConnectionManager<NoTls>>,
+pub fn run_insert(
+    mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>,
     rows: i32,
     values_batch: i32,
     thread_id: i32,
     nontransactional: bool,
     text_fields_length: i32,
+    no_prepared: bool,
 ) -> Vec<u64> {
     let mut query_latencies: Vec<u64> = Vec::new();
     let start_id = rows * thread_id;
@@ -414,14 +284,14 @@ pub fn run_insert_prepared_10(
         connection.simple_query("set yb_disable_transactional_writes=off").expect("error in setting yb_disable_transactional_writes to off");
     }
 
-    let base_insert = "insert into test_table (id, f1, f2, f3, f4) values";
+    let base_insert = "insert into test_table (id,f1,f2,f3,f4) values";
     let mut fields = String::from("");
     for fields_nr in 0..values_batch {
-        fields.push_str(format!("(${}, ${}, ${}, ${}, ${}),", (fields_nr*5)+1,(fields_nr*5)+2,(fields_nr*5)+3,(fields_nr*5)+4,(fields_nr*5)+5).as_str());
+        fields.push_str(format!("(${},${},${},${},${}),", (fields_nr*5)+1,(fields_nr*5)+2,(fields_nr*5)+3,(fields_nr*5)+4,(fields_nr*5)+5).as_str());
     }
     fields.pop();
     let statement = format!("{} {}", &base_insert, fields);
-    let statement = connection.prepare(statement.as_str()).unwrap();
+    let prepared_statement = connection.prepare(statement.as_str()).unwrap();
     for nr in (start_id..end_id).step_by(values_batch.try_into().unwrap()) {
         let mut row_values_i32: Vec<i32>= Vec::new();
         let mut row_values_string: Vec<String>= Vec::new();
@@ -454,14 +324,18 @@ pub fn run_insert_prepared_10(
             // custom execution for the last batch with a lower number of values
             let mut fields = String::from("");
             for fields_nr in 0..(values.len()/5) {
-                fields.push_str(format!("(${}, ${}, ${}, ${}, ${}),", (fields_nr*5)+1, (fields_nr*5)+2, (fields_nr*5)+3, (fields_nr*5)+4, (fields_nr*5)+5 ).as_str());
+                fields.push_str(format!("(${},${},${},${},${}),", (fields_nr*5)+1, (fields_nr*5)+2, (fields_nr*5)+3, (fields_nr*5)+4, (fields_nr*5)+5 ).as_str());
             }
             fields.pop();
             let statement = format!("{} {}", base_insert, fields);
             connection.query(&statement, &values).expect("error in performing of execution of last batch");
         } else {
-            // this is the regular execution of the prepared statement
-            connection.query( &statement, &values[..]).expect("error in performing execution of dynamically created insert");
+            if no_prepared {
+                connection.query(&statement, &values).expect("error in performing execution of dynamically created insert nonprepared");
+            } else {
+                // this is the regular execution of the prepared statement
+                connection.query(&prepared_statement, &values[..]).expect("error in performing execution of dynamically created insert prepared");
+            }
         }
         query_latencies.push(query_start_time.elapsed().as_micros().to_u64().unwrap());
     }
@@ -469,7 +343,7 @@ pub fn run_insert_prepared_10(
 }
 
 pub fn run_insert_copy(
-    mut connection: PooledConnection<PostgresConnectionManager<NoTls>>,
+    mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>,
     rows: i32,
     values_batch: i32,
     thread_id: i32,
@@ -508,7 +382,7 @@ pub fn run_insert_copy(
 }
 
 pub fn run_procedure(
-    mut connection: PooledConnection<PostgresConnectionManager<NoTls>>,
+    mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>,
     rows: i32,
     values_batch: i32,
     thread_id: i32,
@@ -592,7 +466,50 @@ fn make_tls(cacert_file: &str) -> MakeTlsConnector {
     MakeTlsConnector::new(builder.build())
 }
 
-pub fn create_pool_nossl(url: &str, pool_size: i32) -> Pool<PostgresConnectionManager<NoTls>> {
+//pub fn create_pool<T>(url: &str, pool_size: i32, cacert_file: &str) -> T {
+pub fn create_pool(url: &str, pool_size: i32, cacert_file: &str) -> Pool<PostgresConnectionManager<MakeTlsConnector>> {
+
+
+
+       let mut builder = SslConnector::builder(SslMethod::tls()).expect("unable to create sslconnector builder");
+
+       if url.contains("sslmode=require") {
+           builder.set_ca_file(cacert_file).expect("unable to load ca.cert");
+           builder.set_verify(SslVerifyMode::NONE);
+           println!(">> creating ssl pool");
+       } else {
+           println!(">> creating nossl pool");
+       }
+
+       let connector = MakeTlsConnector::new(builder.build());
+       let manager = PostgresConnectionManager::new( url.parse().unwrap(), connector);
+
+       r2d2::Pool::builder()
+           .max_size(pool_size as u32)
+           .connection_timeout(Duration::from_secs(120))
+           .build(manager)
+           .unwrap()
+
+           /*
+    if url.contains("sslmode=require") {
+   } else {
+
+
+       //let manager = PostgresConnectionManager::new( url.parse().unwrap(), NoTls);
+       let connector = MakeTlsConnector::new(builder.build());
+       let manager = PostgresConnectionManager::new( url.parse().unwrap(), connector);
+
+       r2d2::Pool::builder()
+           .max_size(pool_size as u32)
+           .connection_timeout(Duration::from_secs(120))
+           .build(manager)
+           .unwrap()
+   }
+            */
+
+}
+
+pub fn create_pool_nossl<T>(url: &str, pool_size: i32) -> Pool<PostgresConnectionManager<NoTls>> {
     println!(">> creating nossl pool");
     let manager = PostgresConnectionManager::new( url.parse().unwrap(), NoTls);
 

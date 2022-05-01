@@ -33,6 +33,9 @@ struct Opts {
     /// number of tablets
     #[structopt(long, default_value = "3")]
     tablets: i32,
+    /// do NOT use prepared statements
+    #[structopt(long)]
+    no_prepared: bool,
 }
 
 fn main() {
@@ -47,6 +50,7 @@ fn main() {
     let show_rowsize = options.show_rowsize as bool;
     let operations = &options.operations as &str;
     let tablets = options.tablets as i32;
+    let no_prepared = options.no_prepared as bool;
     run(
         cacert_file,
         text_fields_length,
@@ -58,5 +62,6 @@ fn main() {
         show_rowsize,
         operations,
         tablets,
+        no_prepared,
     );
 }
