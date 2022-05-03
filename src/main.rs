@@ -56,13 +56,13 @@ fn main() {
     let url_string = if options.url == URL {
         match env::var("YSQLBENCH_URL") {
             Ok(var) => {
-                changed_options.insert("YSQLBENCH_URL", var.to_owned());
+                changed_options.insert("YSQLBENCH_URL", format!(r#""{}""#, var.to_owned()));
                 var
             },
             Err(_e)        => URL.to_string(),
         }
     } else {
-        changed_options.insert("YSQLBENCH_URL", options.url.to_owned());
+        changed_options.insert("YSQLBENCH_URL", format!(r#""{}""#, options.url.to_owned()));
         options.url
     };
     let url = url_string.as_str();

@@ -12,6 +12,8 @@ use rand::distributions::Alphanumeric;
 use postgres::types::ToSql;
 use num_traits::cast::ToPrimitive;
 use std::io::Write;
+use chrono::{DateTime, Utc};
+use plotters::prelude::*;
 
 //const PG_URL: &str = "host=192.168.66.80 port=5434 sslmode=disable user=yugabyte password=yugabyte";
 
@@ -81,8 +83,10 @@ pub fn run(
                     }
                 });
                 let copy_time = copy_start_time.elapsed().as_micros();
+                let mut graph_data: Vec<(DateTime<Utc>,u64)> = Vec::new();
                 for latency_vec in rx_copy {
-                    for latency in latency_vec {
+                    for ( utc_time, latency ) in latency_vec {
+                        graph_data.push((utc_time, latency));
                         histogram.add(latency);
                         query_time += latency;
                     }
@@ -104,6 +108,8 @@ pub fn run(
                     println!("histogram is per batch ({} rows)", batch_size);
                     println!("{}", histogram);
                 }
+
+                draw_plot(graph_data);
             },
             "insert" => {
                 let connection_pool = connection_pool.clone();
@@ -129,7 +135,7 @@ pub fn run(
                 });
                 let insert_time = insert_start_time.elapsed().as_micros();
                 for latency_vec in rx_insert {
-                    for latency in latency_vec {
+                    for ( _utc_time, latency) in latency_vec {
                         histogram.add(latency);
                         query_time += latency;
                     }
@@ -177,7 +183,7 @@ pub fn run(
                 });
                 let proc_time = proc_start_time.elapsed().as_micros();
                 for latency_vec in rx_proc {
-                    for latency in latency_vec {
+                    for ( _utc_time, latency) in latency_vec {
                         histogram.add(latency);
                         query_time += latency;
                     }
@@ -274,8 +280,8 @@ pub fn run_insert(
     nontransactional: bool,
     text_fields_length: i32,
     no_prepared: bool,
-) -> Vec<u64> {
-    let mut query_latencies: Vec<u64> = Vec::new();
+) -> Vec<(DateTime<Utc>,u64)> {
+    let mut query_latencies: Vec<(DateTime<Utc>,u64)> = Vec::new();
     let start_id = rows * thread_id;
     let end_id = start_id + rows - 1;
 
@@ -338,7 +344,7 @@ pub fn run_insert(
                 connection.query(&prepared_statement, &values[..]).expect("error in performing execution of dynamically created insert prepared");
             }
         }
-        query_latencies.push(query_start_time.elapsed().as_micros().to_u64().unwrap());
+        query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap()));
         connection.simple_query("commit").expect("error executing commit");
 
     }
@@ -352,8 +358,8 @@ pub fn run_copy_from(
     thread_id: i32,
     nontransactional: bool,
     text_fields_length: i32,
-) -> Vec<u64> {
-    let mut query_latencies: Vec<u64> = Vec::new();
+) -> Vec<(DateTime<Utc>,u64)> {
+    let mut query_latencies: Vec<(DateTime<Utc>,u64)> = Vec::new();
     let start_id = rows * thread_id;
     let end_id = start_id + rows - 1;
 
@@ -373,7 +379,7 @@ pub fn run_copy_from(
         }
         let query_start_time = Instant::now();
         writer.write_all(row.as_bytes()).unwrap();
-        query_latencies.push(query_start_time.elapsed().as_micros().to_u64().unwrap());
+        query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap()));
     }
     writer.finish().unwrap();
 
@@ -387,17 +393,17 @@ pub fn run_procedure(
     thread_id: i32,
     nontransactional: bool,
     text_fields_length: i32,
-) -> Vec<u64> {
+) -> Vec<(DateTime<Utc>,u64)> {
     if nontransactional {
         connection.simple_query("set yb_disable_transactional_writes=on").expect("error in setting yb_disable_transactional_writes to on");
     } else {
         connection.simple_query("set yb_disable_transactional_writes=off").expect("error in setting yb_disable_transactional_writes to off");
     }
-    let mut query_latencies: Vec<u64> = Vec::new();
+    let mut query_latencies: Vec<(DateTime<Utc>,u64)> = Vec::new();
     let sql_statement = format!("call load_test({}, {}, {}, {});", rows, text_fields_length, values_batch, thread_id);
     let query_start_time = Instant::now();
     connection.simple_query(&sql_statement).expect("error in executing simple_query call to procedure");
-    query_latencies.push(query_start_time.elapsed().as_micros().to_u64().unwrap());
+    query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap()));
     query_latencies
 }
 
@@ -671,3 +677,34 @@ pub fn run_connect(mut histogram: Histogram) -> Histogram {
     histogram
 }
 */
+
+fn draw_plot(latency_vec: Vec<(DateTime<Utc>,u64)>) {
+    /*
+    let mut start_time = Utc::now();
+    let mut end_time = Utc::now();
+    for (t, v) in latency_vec {
+        if t < start_time {
+            start_time == t;
+        }
+
+    }
+
+     */
+    let start_time = latency_vec.iter().map(|(date, _val)| date).min().unwrap();
+    let end_time = latency_vec.iter().map(|(date, _val)| date).max().unwrap();
+    let low_value: u64 = 0;
+    let high_value = latency_vec.iter().map(|(_date, val)| val).max().unwrap();
+    let root = BitMapBackend::new("plot.png", (600,400))
+        .into_drawing_area();
+    root.fill(&WHITE).unwrap();
+    let mut context = ChartBuilder::on(&root)
+        .set_label_area_size(LabelAreaPosition::Left, 40)
+        .set_label_area_size(LabelAreaPosition::Bottom, 40)
+        .caption("Scatterplot", ("sans-serif", 40))
+        .build_cartesian_2d(*start_time..*end_time, low_value..*high_value)
+        .unwrap();
+    context.configure_mesh().draw().unwrap();
+    context.draw_series(
+        latency_vec.iter().map(|point| Circle::new(*point, 3, &BLUE))
+    ).unwrap();
+}
