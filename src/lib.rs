@@ -13,7 +13,7 @@ use postgres::types::ToSql;
 use num_traits::cast::ToPrimitive;
 use std::io::Write;
 
-const PG_URL: &str = "host=192.168.66.80 port=5434 sslmode=disable user=yugabyte password=yugabyte";
+//const PG_URL: &str = "host=192.168.66.80 port=5434 sslmode=disable user=yugabyte password=yugabyte";
 
 /*
 macro_rules! retry {
@@ -48,8 +48,9 @@ pub fn run(
     operations: &str,
     tablets: i32,
     no_prepared: bool,
+    url: &str,
 ) {
-    let connection_pool = create_pool(PG_URL, threads, cacert_file);
+    let connection_pool = create_pool(url, threads, cacert_file);
 
     let connection = connection_pool.get().unwrap();
     run_create_table(connection, tablets);
@@ -74,7 +75,7 @@ pub fn run(
                         let connection = pool.get().unwrap();
                         let tx_copy = tx_copy.clone();
                         s.spawn(move |_| {
-                            let latencies_vec = run_insert_copy(connection, rows, batch_size, thread_id, nontransactional, text_fields_length);
+                            let latencies_vec = run_copy_from(connection, rows, batch_size, thread_id, nontransactional, text_fields_length);
                             tx_copy.send(latencies_vec).unwrap();
                         });
                     }
@@ -222,7 +223,7 @@ fn run_show_rowsize(mut connection: PooledConnection<PostgresConnectionManager<M
 fn run_create_procedure(mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>> ) {
     let sql_statement = "select count(*) from pg_proc where proname = 'load_test' and prolang = (select oid from pg_language where lanname = 'plpgsql') and prokind = 'p'";
     let row = connection.query_one(sql_statement, &[]).expect("error during select for validating procedure load_test existence via pg_proc");
-    let val: i32 = row.get(0);
+    let val: i64 = row.get(0);
     if val == 0 {
         println!(">> create load_test procedure");
         let sql_statement = "
@@ -338,11 +339,13 @@ pub fn run_insert(
             }
         }
         query_latencies.push(query_start_time.elapsed().as_micros().to_u64().unwrap());
+        connection.simple_query("commit").expect("error executing commit");
+
     }
     query_latencies
 }
 
-pub fn run_insert_copy(
+pub fn run_copy_from(
     mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>,
     rows: i32,
     values_batch: i32,
@@ -360,7 +363,7 @@ pub fn run_insert_copy(
         connection.simple_query("set yb_disable_transactional_writes=off").expect("error in setting yb_disable_transactional_writes to off");
     }
 
-    let mut rows_vec: Vec<String> = Vec::new();
+    let mut writer = connection.copy_in("copy test_table from stdin").expect("error in performing copy_in");
     for nr in (start_id..end_id).step_by(values_batch.try_into().unwrap()) {
         let mut row = String::from("");
         for value_nr in 0..values_batch {
@@ -368,16 +371,12 @@ pub fn run_insert_copy(
                 row.push_str(format!("{}\t{}\t{}\t{}\t{}\n", nr + value_nr, random_characters(text_fields_length), random_characters(text_fields_length), random_characters(text_fields_length), random_characters(text_fields_length)).as_str());
             }
         }
-        rows_vec.push(row);
-    }
-
-    let mut writer = connection.copy_in("copy test_table from stdin").expect("error in performing copy_in");
-    for row in &rows_vec {
         let query_start_time = Instant::now();
         writer.write_all(row.as_bytes()).unwrap();
         query_latencies.push(query_start_time.elapsed().as_micros().to_u64().unwrap());
     }
     writer.finish().unwrap();
+
     query_latencies
 }
 
