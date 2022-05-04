@@ -83,10 +83,10 @@ pub fn run(
                     }
                 });
                 let copy_time = copy_start_time.elapsed().as_micros();
-                let mut graph_data: Vec<(DateTime<Utc>,u64)> = Vec::new();
+                let mut graph_data: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
                 for latency_vec in rx_copy {
-                    for ( utc_time, latency ) in latency_vec {
-                        graph_data.push((utc_time, latency));
+                    for ( utc_time, latency, thread_id ) in latency_vec {
+                        graph_data.push((utc_time, latency, thread_id));
                         histogram.add(latency);
                         query_time += latency;
                     }
@@ -109,7 +109,7 @@ pub fn run(
                     println!("{}", histogram);
                 }
 
-                draw_plot(graph_data);
+                draw_plot(graph_data, "copy");
             },
             "insert" => {
                 let connection_pool = connection_pool.clone();
@@ -134,8 +134,10 @@ pub fn run(
                     }
                 });
                 let insert_time = insert_start_time.elapsed().as_micros();
+                let mut graph_data: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
                 for latency_vec in rx_insert {
-                    for ( _utc_time, latency) in latency_vec {
+                    for ( utc_time, latency, thread_id) in latency_vec {
+                        graph_data.push((utc_time, latency, thread_id));
                         histogram.add(latency);
                         query_time += latency;
                     }
@@ -158,6 +160,8 @@ pub fn run(
                     println!("histogram is per batch ({} rows)", batch_size);
                     println!("{}", histogram);
                 }
+
+                draw_plot(graph_data, "insert");
             },
             "procedure" => {
                 let connection_pool = connection_pool.clone();
@@ -182,8 +186,10 @@ pub fn run(
                     }
                 });
                 let proc_time = proc_start_time.elapsed().as_micros();
+                let mut graph_data: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
                 for latency_vec in rx_proc {
-                    for ( _utc_time, latency) in latency_vec {
+                    for ( utc_time, latency, thread_id) in latency_vec {
+                        graph_data.push((utc_time, latency, thread_id));
                         histogram.add(latency);
                         query_time += latency;
                     }
@@ -201,6 +207,8 @@ pub fn run(
                 println!("nontransactional: {:>12}", nontransactional);
                 println!("wallclock tm/row: {:12.6} us", proc_time as f64 / (rows * threads).to_f64().unwrap());
                 println!("db tm/row       : {:12.6} us", query_time as f64 / (rows * threads).to_f64().unwrap());
+
+                draw_plot(graph_data, "procedure");
             },
             &_ => println!("unknown operation: {}", operation),
         }
@@ -280,8 +288,8 @@ pub fn run_insert(
     nontransactional: bool,
     text_fields_length: i32,
     no_prepared: bool,
-) -> Vec<(DateTime<Utc>,u64)> {
-    let mut query_latencies: Vec<(DateTime<Utc>,u64)> = Vec::new();
+) -> Vec<(DateTime<Utc>,u64,i32)> {
+    let mut query_latencies: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
     let start_id = rows * thread_id;
     let end_id = start_id + rows - 1;
 
@@ -344,7 +352,7 @@ pub fn run_insert(
                 connection.query(&prepared_statement, &values[..]).expect("error in performing execution of dynamically created insert prepared");
             }
         }
-        query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap()));
+        query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap(), thread_id));
         connection.simple_query("commit").expect("error executing commit");
 
     }
@@ -358,8 +366,8 @@ pub fn run_copy_from(
     thread_id: i32,
     nontransactional: bool,
     text_fields_length: i32,
-) -> Vec<(DateTime<Utc>,u64)> {
-    let mut query_latencies: Vec<(DateTime<Utc>,u64)> = Vec::new();
+) -> Vec<(DateTime<Utc>,u64, i32)> {
+    let mut query_latencies: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
     let start_id = rows * thread_id;
     let end_id = start_id + rows - 1;
 
@@ -379,7 +387,7 @@ pub fn run_copy_from(
         }
         let query_start_time = Instant::now();
         writer.write_all(row.as_bytes()).unwrap();
-        query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap()));
+        query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap(), thread_id));
     }
     writer.finish().unwrap();
 
@@ -393,17 +401,17 @@ pub fn run_procedure(
     thread_id: i32,
     nontransactional: bool,
     text_fields_length: i32,
-) -> Vec<(DateTime<Utc>,u64)> {
+) -> Vec<(DateTime<Utc>,u64,i32)> {
     if nontransactional {
         connection.simple_query("set yb_disable_transactional_writes=on").expect("error in setting yb_disable_transactional_writes to on");
     } else {
         connection.simple_query("set yb_disable_transactional_writes=off").expect("error in setting yb_disable_transactional_writes to off");
     }
-    let mut query_latencies: Vec<(DateTime<Utc>,u64)> = Vec::new();
+    let mut query_latencies: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
     let sql_statement = format!("call load_test({}, {}, {}, {});", rows, text_fields_length, values_batch, thread_id);
     let query_start_time = Instant::now();
     connection.simple_query(&sql_statement).expect("error in executing simple_query call to procedure");
-    query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap()));
+    query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap(), thread_id));
     query_latencies
 }
 
@@ -678,33 +686,30 @@ pub fn run_connect(mut histogram: Histogram) -> Histogram {
 }
 */
 
-fn draw_plot(latency_vec: Vec<(DateTime<Utc>,u64)>) {
-    /*
-    let mut start_time = Utc::now();
-    let mut end_time = Utc::now();
-    for (t, v) in latency_vec {
-        if t < start_time {
-            start_time == t;
-        }
-
-    }
-
-     */
-    let start_time = latency_vec.iter().map(|(date, _val)| date).min().unwrap();
-    let end_time = latency_vec.iter().map(|(date, _val)| date).max().unwrap();
+fn draw_plot(latency_vec: Vec<(DateTime<Utc>,u64,i32)>, heading: &str) {
+    let start_time = latency_vec.iter().map(|(date, _val, _thread_id)| date).min().unwrap();
+    let end_time = latency_vec.iter().map(|(date, _val, _thread_id)| date).max().unwrap();
     let low_value: u64 = 0;
-    let high_value = latency_vec.iter().map(|(_date, val)| val).max().unwrap();
+    let high_value = latency_vec.iter().map(|(_date, val, _thread_id)| val).max().unwrap();
     let root = BitMapBackend::new("plot.png", (600,400))
         .into_drawing_area();
     root.fill(&WHITE).unwrap();
     let mut context = ChartBuilder::on(&root)
-        .set_label_area_size(LabelAreaPosition::Left, 40)
-        .set_label_area_size(LabelAreaPosition::Bottom, 40)
-        .caption("Scatterplot", ("sans-serif", 40))
+        .set_label_area_size(LabelAreaPosition::Left, 60)
+        .set_label_area_size(LabelAreaPosition::Bottom, 50)
+        .caption(heading, ("sans-serif", 20))
         .build_cartesian_2d(*start_time..*end_time, low_value..*high_value)
         .unwrap();
-    context.configure_mesh().draw().unwrap();
+    context.configure_mesh()
+        .x_labels(4)
+        .x_label_formatter(&|x| x.naive_local().to_string())
+        .x_desc("Time")
+        .y_desc("Latency in microseconds per batch")
+        .draw()
+        .unwrap();
     context.draw_series(
-        latency_vec.iter().map(|point| Circle::new(*point, 3, &BLUE))
+        latency_vec.iter().map(|(timestamp, latency, thread_id)| Circle::new((*timestamp, *latency), 2, &Palette99::pick(*thread_id as usize)))
     ).unwrap();
+    //.label().map(|(timestamp, latency, thread_id)| thread_id)
+    //.legend(move |(x,y)| Rectangle::new(vec![(x,y), (x+20,y)], color.filled() ))
 }
