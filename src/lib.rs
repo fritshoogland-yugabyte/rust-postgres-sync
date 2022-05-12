@@ -51,11 +51,12 @@ pub fn run(
     tablets: i32,
     no_prepared: bool,
     url: &str,
+    drop: bool,
 ) {
     let connection_pool = create_pool(url, threads, cacert_file);
 
     let connection = connection_pool.get().unwrap();
-    run_create_table(connection, tablets);
+    run_create_table(connection, tablets, drop);
     let connection = connection_pool.get().unwrap();
     run_create_procedure(connection);
 
@@ -215,7 +216,11 @@ pub fn run(
     }
 }
 
-fn run_create_table(mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, tablets: i32) {
+fn run_create_table(mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, tablets: i32, drop: bool) {
+    if drop {
+        let sql_statement = format!("drop table if exists test_table");
+        connection.simple_query(&sql_statement).expect("error during drop table if exists test_table");
+    };
     let sql_statement = format!("create table if not exists test_table( id int primary key, f1 text, f2 text, f3 text, f4 text) split into {} tablets", tablets);
     connection.simple_query(&sql_statement).expect("error during create table if not exists test_table");
 }

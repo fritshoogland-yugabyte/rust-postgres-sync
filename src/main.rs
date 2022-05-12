@@ -45,6 +45,9 @@ struct Opts {
     /// YSQL connect url
     #[structopt(short, long, default_value = URL)]
     url: String,
+    /// drop table
+    #[structopt(long)]
+    drop: bool,
 }
 
 fn main() {
@@ -78,7 +81,7 @@ fn main() {
     let operations = &options.operations as &str;
     let tablets = options.tablets as i32;
     let no_prepared = options.no_prepared as bool;
-    //let url = &options.url as &str;
+    let drop = options.drop as bool;
     run(
         cacert_file,
         text_fields_length,
@@ -92,6 +95,7 @@ fn main() {
         tablets,
         no_prepared,
         url,
+        drop,
     );
 
     if changed_options.len() > 0 {
