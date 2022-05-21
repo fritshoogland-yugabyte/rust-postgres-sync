@@ -62,11 +62,11 @@ pub fn run(
 
     for operation in operations.split(",") {
         match operation {
-            "copy" => {
+            "copy_mem" => {
                 let connection_pool = connection_pool.clone();
                 let connection = connection_pool.get().unwrap();
                 run_truncate(connection);
-                println!(">> copy");
+                println!(">> copy_mem");
                 let pool = connection_pool.clone();
                 let tp = rayon::ThreadPoolBuilder::new().num_threads(10).build().unwrap();
                 let (tx_copy, rx_copy) = channel();
@@ -110,7 +110,57 @@ pub fn run(
                     println!("{}", histogram);
                 }
 
-                draw_plot(graph_data, "copy");
+                draw_plot(graph_data, "copy_mem");
+            },
+            "copy_file" => {
+                let connection_pool = connection_pool.clone();
+                let connection = connection_pool.get().unwrap();
+                run_truncate(connection);
+                println!(">> copy_file");
+                let pool = connection_pool.clone();
+                let tp = rayon::ThreadPoolBuilder::new().num_threads(10).build().unwrap();
+                let (tx_copy, rx_copy) = channel();
+                let mut histogram = Histogram::with_buckets(10);
+                let mut query_time: u64 = 0;
+                let copy_start_time = Instant::now();
+                tp.scope(move |s| {
+                    for thread_id in 0..threads {
+                        let connection = pool.get().unwrap();
+                        let tx_copy = tx_copy.clone();
+                        s.spawn(move |_| {
+                            let latencies_vec = run_copy_file(connection, rows, batch_size, thread_id, nontransactional, text_fields_length, threads);
+                            tx_copy.send(latencies_vec).unwrap();
+                        });
+                    }
+                });
+                let copy_time = copy_start_time.elapsed().as_micros();
+                let mut graph_data: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
+                for latency_vec in rx_copy {
+                    for ( utc_time, latency, thread_id ) in latency_vec {
+                        graph_data.push((utc_time, latency, thread_id));
+                        histogram.add(latency);
+                        query_time += latency;
+                    }
+                }
+                if show_rowsize {
+                    let connection = connection_pool.get().unwrap();
+                    run_show_rowsize(connection);
+                }
+                println!("wallclock time  : {:12.6} sec", copy_time as f64 / 1000000.0);
+                println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/copy_time as f64)*100.0);
+                println!("rows per thread : {:12}", rows);
+                println!("threads         : {:12}", threads);
+                println!("batch           : {:12}", "-");
+                println!("total rows      : {:12}", rows * threads);
+                println!("nontransactional: {:>12}", nontransactional);
+                println!("wallclock tm/row: {:12.6} us", copy_time as f64 / (rows * threads).to_f64().unwrap());
+                println!("db tm/row       : {:12.6} us", query_time as f64 / (rows * threads).to_f64().unwrap());
+                if print_histogram {
+                    println!("histogram is per batch ({} rows)", batch_size);
+                    println!("{}", histogram);
+                }
+
+                draw_plot(graph_data, "copy_file");
             },
             "insert" => {
                 let connection_pool = connection_pool.clone();
@@ -236,7 +286,6 @@ fn run_show_rowsize(mut connection: PooledConnection<PostgresConnectionManager<M
     let row = connection.query_one(sql_statement, &[]).expect("error during select for table size");
     let val: i64 = row.get(0);
     println!("row size        : {:12} bytes", val);
-
 }
 
 fn run_create_procedure(mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>> ) {
@@ -395,6 +444,33 @@ pub fn run_copy_from(
         query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap(), thread_id));
     }
     writer.finish().unwrap();
+
+    query_latencies
+}
+
+pub fn run_copy_file(
+    mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>,
+    rows: i32,
+    _values_batch: i32,
+    thread_id: i32,
+    nontransactional: bool,
+    text_fields_length: i32,
+    threads: i32,
+) -> Vec<(DateTime<Utc>,u64, i32)> {
+    let mut query_latencies: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
+
+    if nontransactional {
+        connection.simple_query("set yb_disable_transactional_writes=on").expect("error in setting yb_disable_transactional_writes to on");
+    } else {
+        connection.simple_query("set yb_disable_transactional_writes=off").expect("error in setting yb_disable_transactional_writes to off");
+    }
+
+    let sql_statement = format!("copy test_table from '/tmp/ysql_bench-t{}-r{}-f{}--nr{}.csv' with (format csv)",threads,rows,text_fields_length,thread_id+1);
+
+    let query_start_time = Instant::now();
+    connection.simple_query(&sql_statement).expect("error during copy from file");
+    query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap(), thread_id));
+
 
     query_latencies
 }

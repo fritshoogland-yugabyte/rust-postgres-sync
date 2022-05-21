@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::{env, process, fs};
 use std::io::Write;
 
-const URL: &str = "host=192.168.66.80 port=5434 sslmode=disable user=yugabyte password=yugabyte";
+const URL: &str = "host=192.168.66.80 port=5433 sslmode=disable user=yugabyte password=yugabyte";
 
 #[derive(Debug, StructOpt)]
 struct Opts {
@@ -33,8 +33,8 @@ struct Opts {
     /// show the size of a row
     #[structopt(long)]
     show_rowsize: bool,
-    /// operations (copy,insert,procedure)
-    #[structopt(short, long, default_value = "copy,insert,procedure")]
+    /// operations (copy_mem,copy_file,insert,procedure)
+    #[structopt(short, long, default_value = "copy_mem,copy_file,insert,procedure")]
     operations: String,
     /// number of tablets
     #[structopt(long, default_value = "3")]

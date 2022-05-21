@@ -28,3 +28,8 @@ criterion = "0.3"
 [[bench]]
 name = "connect_remote"
 harness = false
+
+[[bin]]
+name = "csv_generator"
+test = false
+bench = false
