@@ -4,3 +4,6 @@ yum install -y cmake gcc-c++ freetype-devel expat-devel open-sans-fonts fontconf
 Cargo.toml:
 [dependencies]
 cmake = "=0.1.45"
+
+to perform copy from on the server:
+grant pg_read_server_files to yugabyte;

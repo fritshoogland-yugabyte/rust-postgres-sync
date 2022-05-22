@@ -268,9 +268,11 @@ pub fn run(
 
 fn run_create_table(mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, tablets: i32, drop: bool) {
     if drop {
+        println!(">> drop table");
         let sql_statement = format!("drop table if exists test_table");
         connection.simple_query(&sql_statement).expect("error during drop table if exists test_table");
     };
+    println!(">> create table if not exists");
     let sql_statement = format!("create table if not exists test_table( id int primary key, f1 text, f2 text, f3 text, f4 text) split into {} tablets", tablets);
     connection.simple_query(&sql_statement).expect("error during create table if not exists test_table");
 }
