@@ -109,7 +109,6 @@ pub fn run(
                     println!("histogram is per batch ({} rows)", batch_size);
                     println!("{}", histogram);
                 }
-
                 draw_plot(graph_data, "copy_mem");
             },
             "copy_file" => {
@@ -148,18 +147,17 @@ pub fn run(
                 }
                 println!("wallclock time  : {:12.6} sec", copy_time as f64 / 1000000.0);
                 println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/copy_time as f64)*100.0);
-                println!("rows per thread : {:12}", rows);
+                println!("rows per thread : {:12}", rows/threads);
                 println!("threads         : {:12}", threads);
                 println!("batch           : {:12}", "-");
-                println!("total rows      : {:12}", rows * threads);
+                println!("total rows      : {:12}", rows);
                 println!("nontransactional: {:>12}", nontransactional);
-                println!("wallclock tm/row: {:12.6} us", copy_time as f64 / (rows * threads).to_f64().unwrap());
-                println!("db tm/row       : {:12.6} us", query_time as f64 / (rows * threads).to_f64().unwrap());
+                println!("wallclock tm/row: {:12.6} us", copy_time as f64 / rows.to_f64().unwrap());
+                println!("db tm/row       : {:12.6} us", query_time as f64 / rows.to_f64().unwrap());
                 if print_histogram {
                     println!("histogram is per batch ({} rows)", batch_size);
                     println!("{}", histogram);
                 }
-
                 draw_plot(graph_data, "copy_file");
             },
             "insert" => {
@@ -498,50 +496,6 @@ pub fn run_procedure(
     query_latencies
 }
 
-/*
-    let base_insert = "insert into test_table (id, f1, f2, f3, f4) values";
-    let mut fields = String::from("");
-    for fields_nr in 0..values_batch {
-        fields.push_str(format!("(${}, ${}, ${}, ${}, ${}),", (fields_nr*5)+1, (fields_nr*5)+2, (fields_nr*5)+3, (fields_nr*5)+4, (fields_nr*5)+5 ).as_str());
-    }
-    fields.pop();
-    let statement = format!("{} {}", base_insert, fields);
-    let statement = connection.prepare(statement.as_str()).unwrap();
-    for nr in (0..rows).step_by(values_batch.try_into().unwrap()) {
-        let mut row_values_i32: Vec<i32>= Vec::new();
-        let mut row_values_string: Vec<String>= Vec::new();
-        let mut values: Vec<&(dyn ToSql + Sync)> = Vec::new();
-        for value_nr in 0..values_batch {
-            // build a vector with field values
-            row_values_i32.push(nr + value_nr + 1);
-            row_values_string.push(random_characters(FIELD_LENGTH));
-            row_values_string.push(random_characters(FIELD_LENGTH));
-            row_values_string.push(random_characters(FIELD_LENGTH));
-            row_values_string.push(random_characters(FIELD_LENGTH));
-        }
-        for value_nr in 0..values_batch {
-            // build a ToSql vector with references to the field values
-            values.push(&row_values_i32[value_nr.to_usize().unwrap()] );
-            values.push(&row_values_string[((value_nr*4)+0).to_usize().unwrap()] );
-            values.push(&row_values_string[((value_nr*4)+1).to_usize().unwrap()] );
-            values.push(&row_values_string[((value_nr*4)+2).to_usize().unwrap()] );
-            values.push(&row_values_string[((value_nr*4)+3).to_usize().unwrap()] );
-        }
-
-        let query_start_time = Instant::now();
-        connection.query( &statement, &values[..]).unwrap();
-        histogram.add(query_start_time.elapsed().as_micros().try_into().unwrap());
-        overall_query_time += query_start_time.elapsed().as_micros()
-    }
-    let overall_total_time = overall_start_time.elapsed().as_micros();
-    println!("total rows     : {:6}", rows);
-    println!("values batch   : {:6}", values_batch);
-    println!("total time (s) : {:13.6}", overall_total_time as f64/1000000.0);
-    println!("total query (s): {:13.6} SQL time: {:5.2}%", overall_query_time as f64/1000000.0, overall_query_time as f64/overall_total_time as f64*100.0);
-    //println!("{}", histogram);
-}
-
- */
 
 #[allow(dead_code)]
 fn create_connection(url: &str, cacert_file: &str) -> Client {
@@ -562,10 +516,7 @@ fn make_tls(cacert_file: &str) -> MakeTlsConnector {
     MakeTlsConnector::new(builder.build())
 }
 
-//pub fn create_pool<T>(url: &str, pool_size: i32, cacert_file: &str) -> T {
 pub fn create_pool(url: &str, pool_size: i32, cacert_file: &str) -> Pool<PostgresConnectionManager<MakeTlsConnector>> {
-
-
 
        let mut builder = SslConnector::builder(SslMethod::tls()).expect("unable to create sslconnector builder");
 
@@ -585,24 +536,6 @@ pub fn create_pool(url: &str, pool_size: i32, cacert_file: &str) -> Pool<Postgre
            .connection_timeout(Duration::from_secs(120))
            .build(manager)
            .unwrap()
-
-           /*
-    if url.contains("sslmode=require") {
-   } else {
-
-
-       //let manager = PostgresConnectionManager::new( url.parse().unwrap(), NoTls);
-       let connector = MakeTlsConnector::new(builder.build());
-       let manager = PostgresConnectionManager::new( url.parse().unwrap(), connector);
-
-       r2d2::Pool::builder()
-           .max_size(pool_size as u32)
-           .connection_timeout(Duration::from_secs(120))
-           .build(manager)
-           .unwrap()
-   }
-            */
-
 }
 
 pub fn create_pool_nossl<T>(url: &str, pool_size: i32) -> Pool<PostgresConnectionManager<NoTls>> {
@@ -638,137 +571,6 @@ fn random_characters(length: i32) -> String {
         .collect()
 }
 
-/*
-pub fn run_test() {
-    let nr_loop=10000;
-    let urls = [ "host=/tmp sslmode=disable user=postgres password=postgres",
-        "host=localhost port=5432 sslmode=disable user=postgres password=postgres",
-        "host=localhost port=5432 sslmode=require user=postgres password=postgres",
-        "host=10.0.2.15 port=5432 sslmode=disable user=postgres password=postgres",
-        "host=10.0.2.15 port=5432 sslmode=require user=postgres password=postgres" ];
-    let mut builder = SslConnector::builder(SslMethod::tls()).expect("unable to create sslconnector builder");
-    builder.set_ca_file("/tmp/ca.cert").expect("unable to load ca.cert");
-    builder.set_verify(SslVerifyMode::NONE);
-    let connector = MakeTlsConnector::new(builder.build());
-    for url in urls {
-        let mut histogram = Histogram::with_buckets(10);
-        for _ in 0..nr_loop {
-            let connector = connector.clone();
-            let now = Instant::now();
-            if url.contains("sslmode=disable") {
-                let _connection=create_notls_connection(url);
-            } else {
-                let _connection=create_tls_connection(url, connector);
-            }
-            histogram.add(now.elapsed().as_micros().try_into().unwrap());
-        }
-        println!("Run: {}", url);
-        println!("{}", histogram);
-    }
-}
-pub fn create_notls_connection(url: &str) -> Client {
-    let connection = Client::connect(url, NoTls).expect("failed to create notls postgres connection");
-    connection
-}
-pub fn create_tls_connection(url: &str, connection: MakeTlsConnector) -> Client {
-    let connection = Client::connect(url, connection).expect("failed to create tls postgres connection");
-    connection
-}
-
- */
-
-/*
-pub fn create_socket_connection() -> Client {
-    let url = "host=/tmp sslmode=disable user=postgres password=postgres";
-    let connection = Client::connect(url, NoTls).expect("failed to create postgres connection");
-    connection
-}
-pub fn create_localhost_nossl_connection() -> Client {
-    let url = "host=localhost port=5432 sslmode=disable user=postgres password=postgres";
-    let connection = Client::connect(url, NoTls).expect("failed to create postgres connection");
-    connection
-}
-
-pub fn create_localhost_ssl_connection() -> Client {
-    let mut builder = SslConnector::builder(SslMethod::tls()).expect("unable to create sslconnector builder");
-    builder.set_ca_file("/tmp/ca.cert").expect("unable to load ca.cert");
-    builder.set_verify(SslVerifyMode::NONE);
-    let connector = MakeTlsConnector::new(builder.build());
-    let url = "host=localhost port=5432 sslmode=require user=postgres password=postgres";
-    let connection = Client::connect(url, connector).expect("failed to create postgres connection");
-    connection
-}
-
-pub fn create_nic_nossl_connection() -> Client {
-    let url = "host=10.0.2.15 port=5432 sslmode=disable user=postgres password=postgres";
-    let connection = Client::connect(url, NoTls).expect("failed to create postgres connection");
-    connection
-}
-
-pub fn create_nic_ssl_connection() -> Client {
-    let mut builder = SslConnector::builder(SslMethod::tls()).expect("unable to create sslconnector builder");
-    builder.set_ca_file("/tmp/ca.cert").expect("unable to load ca.cert");
-    builder.set_verify(SslVerifyMode::NONE);
-    let connector = MakeTlsConnector::new(builder.build());
-    let url = "host=10.0.2.15 port=5432 sslmode=require user=postgres password=postgres";
-    let connection = Client::connect(url, connector).expect("failed to create postgres connection");
-    connection
-}
-pub fn create_pool() -> Pool<PostgresConnectionManager<NoTls>> {
-    let manager = PostgresConnectionManager::new(
-        "host=192.168.66.80,192.168.66.81,192.168.66.82 port=5433 user=yugabyte password=yugabyte".parse().unwrap(),
-        NoTls,
-    );
-    r2d2::Pool::builder()
-        .max_size(5)
-        .connection_timeout(Duration::from_secs(120))
-        .build(manager)
-        .unwrap()
-}
-
-pub fn run_queries(pool: Pool<PostgresConnectionManager<NoTls>>, mut histogram: Histogram) -> Histogram {
-    let tp = rayon::ThreadPoolBuilder::new().num_threads(10).build().unwrap();
-    let (tx,rx) = channel();
-    tp.scope(move |s| {
-        for _i in 0..10 {
-            let pool = pool.clone();
-            let tx = tx.clone();
-            s.spawn(move |_| {
-                let mut client = pool.get().unwrap();
-                //client.execute("select $1", &[&i.to_string()]).unwrap();
-                for _ in 0..1000
-                {
-                    let now = Instant::now();
-                    //client.simple_query("select pg_sleep(10)").unwrap();
-                    client.simple_query("select 1").unwrap();
-                    //histogram.add(now.elapsed().as_micros().try_into().unwrap())
-                    tx.send(now.elapsed().as_micros());
-                    //thread::sleep(Duration::from_secs(60));
-                }
-            });
-        }
-    });
-    for sample in rx {
-        histogram.add(sample.try_into().unwrap());
-    }
-    histogram
-}
-
-fn run_query(mut connection: Client) {
-    connection.simple_query("select 1").unwrap();
-}
-
-pub fn run_connect(mut histogram: Histogram) -> Histogram {
-    for _ in 0..1000 {
-        let now = Instant::now();
-        let connection = create_localhost_nossl_connection();
-        histogram.add(now.elapsed().as_micros().try_into().unwrap());
-        //run_query(connection);
-    }
-    histogram
-}
-*/
-
 fn draw_plot(latency_vec: Vec<(DateTime<Utc>,u64,i32)>, heading: &str) {
     let start_time = latency_vec.iter().map(|(date, _val, _thread_id)| date).min().unwrap();
     let end_time = latency_vec.iter().map(|(date, _val, _thread_id)| date).max().unwrap();
@@ -793,6 +595,4 @@ fn draw_plot(latency_vec: Vec<(DateTime<Utc>,u64,i32)>, heading: &str) {
     context.draw_series(
         latency_vec.iter().map(|(timestamp, latency, thread_id)| Circle::new((*timestamp, *latency), 2, &Palette99::pick(*thread_id as usize)))
     ).unwrap();
-    //.label().map(|(timestamp, latency, thread_id)| thread_id)
-    //.legend(move |(x,y)| Rectangle::new(vec![(x,y), (x+20,y)], color.filled() ))
 }
