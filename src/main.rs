@@ -33,8 +33,8 @@ struct Opts {
     /// show the size of a row
     #[structopt(long)]
     show_rowsize: bool,
-    /// operations (copy_mem,copy_file,insert,procedure)
-    #[structopt(short, long, default_value = "copy_mem,copy_file,insert,procedure")]
+    /// operations (copy_mem,copy_file,insert,procedure,select)
+    #[structopt(short, long, default_value = "copy_mem,copy_file,insert,procedure,select")]
     operations: String,
     /// number of tablets
     #[structopt(long, default_value = "3")]
@@ -48,6 +48,12 @@ struct Opts {
     /// drop table
     #[structopt(long)]
     drop: bool,
+    /// create graph of the measured statistics
+    #[structopt(long)]
+    graph: bool,
+    /// runtime for select in minutes
+    #[structopt(long, default_value = "30")]
+    runtime_select: i64,
 }
 
 fn main() {
@@ -73,6 +79,7 @@ fn main() {
     let cacert_file = &options.cacert_file as &str;
     let text_fields_length = options.fields_length as i32;
     let batch_size = options.batch_size as i32;
+    let runtime_select = options.runtime_select as i64;
     let rows = options.rows as i32;
     let threads = options.threads as i32;
     let print_histogram = options.print_histogram as bool;
@@ -82,6 +89,7 @@ fn main() {
     let tablets = options.tablets as i32;
     let no_prepared = options.no_prepared as bool;
     let drop = options.drop as bool;
+    let graph = options.graph as bool;
     run(
         cacert_file,
         text_fields_length,
@@ -96,6 +104,8 @@ fn main() {
         no_prepared,
         url,
         drop,
+        graph,
+        runtime_select,
     );
 
     if changed_options.len() > 0 {

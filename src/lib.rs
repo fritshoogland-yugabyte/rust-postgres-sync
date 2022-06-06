@@ -8,12 +8,13 @@ use postgres::{Client, NoTls};
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
 use rand::{thread_rng, Rng};
-use rand::distributions::Alphanumeric;
+use rand::distributions::{Alphanumeric, Uniform, Distribution};
 use postgres::types::ToSql;
 use num_traits::cast::ToPrimitive;
 use std::io::Write;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Local};
 use plotters::prelude::*;
+
 
 //const PG_URL: &str = "host=192.168.66.80 port=5434 sslmode=disable user=yugabyte password=yugabyte";
 
@@ -52,6 +53,8 @@ pub fn run(
     no_prepared: bool,
     url: &str,
     drop: bool,
+    graph: bool,
+    runtime_select: i64,
 ) {
     let connection_pool = create_pool(url, threads, cacert_file);
 
@@ -109,7 +112,9 @@ pub fn run(
                     println!("histogram is per batch ({} rows)", batch_size);
                     println!("{}", histogram);
                 }
-                draw_plot(graph_data, "copy_mem");
+                if graph {
+                    draw_plot(graph_data, "copy_mem");
+                }
             },
             "copy_file" => {
                 let connection_pool = connection_pool.clone();
@@ -158,7 +163,9 @@ pub fn run(
                     println!("histogram is per batch ({} rows)", batch_size);
                     println!("{}", histogram);
                 }
-                draw_plot(graph_data, "copy_file");
+                if graph {
+                    draw_plot(graph_data, "copy_file");
+                }
             },
             "insert" => {
                 let connection_pool = connection_pool.clone();
@@ -209,8 +216,63 @@ pub fn run(
                     println!("histogram is per batch ({} rows)", batch_size);
                     println!("{}", histogram);
                 }
+                if graph {
+                    draw_plot(graph_data, "insert");
+                }
+            },
+            "select" => {
+                let connection_pool = connection_pool.clone();
+                //let connection = connection_pool.get().unwrap();
+                //run_truncate(connection);
 
-                draw_plot(graph_data, "insert");
+                println!(">> select");
+                let pool = connection_pool.clone();
+                let tp = rayon::ThreadPoolBuilder::new().num_threads(10).build().unwrap();
+                let (tx_select, rx_select) = channel();
+                let mut histogram = Histogram::with_buckets(10);
+                let mut query_time: u64 = 0;
+                let select_start_time = Instant::now();
+                tp.scope(move |s| {
+                    for thread_id in 0..threads {
+                        let connection = pool.get().unwrap();
+                        let tx_select = tx_select.clone();
+                        s.spawn(move |_| {
+                            let latencies = run_select(connection, rows, runtime_select, thread_id, no_prepared);
+                            tx_select.send(latencies).unwrap();
+                        });
+                    }
+                });
+                let select_time = select_start_time.elapsed().as_micros();
+                let mut graph_data: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
+                for latency_vec in rx_select {
+                    for ( utc_time, latency, thread_id) in latency_vec {
+                        graph_data.push((utc_time, latency, thread_id));
+                        histogram.add(latency);
+                        query_time += latency;
+                    }
+                }
+                if show_rowsize {
+                    let connection = connection_pool.get().unwrap();
+                    run_show_rowsize(connection);
+                }
+                println!("wallclock time  : {:12.6} sec", select_time as f64 / 1000000.0);
+                println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/select_time as f64)*100.0);
+                println!("threads         : {:12}", threads);
+                println!("nr queries      : {:12}", graph_data.iter().count());
+                println!("nr queries/thr. : {:12}", graph_data.iter().count() as f64/threads.to_f64().unwrap());
+                println!("avg query time  : {:12.6} us", graph_data.iter().map(|(_x, y, _z)| y.to_f64().unwrap()).sum::<f64>() / graph_data.iter().count() as f64);
+                //println!("batch           : {:12}", batch_size);
+                //println!("total rows      : {:12}", rows * threads);
+                //println!("nontransactional: {:>12}", nontransactional);
+                println!("no_prepared     : {:>12}", no_prepared);
+                //println!("wallclock tm/row: {:12.6} us", select_time as f64 / (rows * threads).to_f64().unwrap());
+                //println!("db tm/row       : {:12.6} us", query_time as f64 / (rows * threads).to_f64().unwrap());
+                if print_histogram {
+                    println!("{}", histogram);
+                }
+                if graph {
+                    draw_plot(graph_data, "select");
+                }
             },
             "procedure" => {
                 let connection_pool = connection_pool.clone();
@@ -257,7 +319,9 @@ pub fn run(
                 println!("wallclock tm/row: {:12.6} us", proc_time as f64 / (rows * threads).to_f64().unwrap());
                 println!("db tm/row       : {:12.6} us", query_time as f64 / (rows * threads).to_f64().unwrap());
 
-                draw_plot(graph_data, "procedure");
+                if graph {
+                    draw_plot(graph_data, "procedure");
+                }
             },
             &_ => println!("unknown operation: {}", operation),
         }
@@ -410,6 +474,43 @@ pub fn run_insert(
         connection.simple_query("commit").expect("error executing commit");
 
     }
+    query_latencies
+}
+
+pub fn run_select(
+    mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>,
+    rows: i32,
+    runtime_select: i64,
+    thread_id: i32,
+    no_prepared: bool,
+) -> Vec<(DateTime<Utc>,u64,i32)> {
+    let mut query_latencies: Vec<(DateTime<Utc>, u64, i32)> = Vec::new();
+    //let start_id = rows * thread_id;
+    //let end_id = start_id + rows - 1;
+
+    let select_statement = "select f1, f2, f3, f4 from test_table where id = $1";
+    let prepared_select_statement = connection.prepare(select_statement).unwrap();
+    let mut rng = rand::thread_rng();
+    let range = Uniform::from(0..rows);
+    let begin_time = Local::now();
+
+    loop {
+        if Local::now() >= begin_time.checked_add_signed(chrono::Duration::minutes(runtime_select)).unwrap() { break };
+        let query_start_time = Instant::now();
+        //dbg!(rows);
+        let number = range.sample(&mut rng);
+        let result = if no_prepared {
+            connection.query_one(select_statement, &[&number]).unwrap()
+        } else {
+            connection.query_one(&prepared_select_statement, &[&number]).unwrap()
+        };
+        let _f1: &str = result.get("f1");
+        let _f2: &str = result.get("f2");
+        let _f3: &str = result.get("f3");
+        let _f4: &str = result.get("f4");
+        query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap(), thread_id));
+    }
+
     query_latencies
 }
 
