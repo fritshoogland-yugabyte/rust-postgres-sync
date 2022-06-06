@@ -259,7 +259,7 @@ pub fn run(
                 println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/select_time as f64)*100.0);
                 println!("threads         : {:12}", threads);
                 println!("nr queries      : {:12}", graph_data.iter().count());
-                println!("nr queries/thr. : {:12}", graph_data.iter().count() as f64/threads.to_f64().unwrap());
+                println!("nr queries/thr. : {:12.0}", graph_data.iter().count() as f64/threads.to_f64().unwrap());
                 println!("avg.wallclock/q : {:12.6} us", select_time as f64 / graph_data.iter().count() as f64);
                 println!("avg.time/query  : {:12.6} us", graph_data.iter().map(|(_x, y, _z)| y.to_f64().unwrap()).sum::<f64>() / graph_data.iter().count() as f64);
                 //println!("batch           : {:12}", batch_size);
@@ -678,7 +678,7 @@ fn draw_plot(latency_vec: Vec<(DateTime<Utc>,u64,i32)>, heading: &str) {
     let end_time = latency_vec.iter().map(|(date, _val, _thread_id)| date).max().unwrap();
     let low_value: u64 = 0;
     let high_value = latency_vec.iter().map(|(_date, val, _thread_id)| val).max().unwrap();
-    let root = BitMapBackend::new("plot.png", (600,400))
+    let root = BitMapBackend::new("plot.png", (1024,768))
         .into_drawing_area();
     root.fill(&WHITE).unwrap();
     let mut context = ChartBuilder::on(&root)
@@ -695,6 +695,6 @@ fn draw_plot(latency_vec: Vec<(DateTime<Utc>,u64,i32)>, heading: &str) {
         .draw()
         .unwrap();
     context.draw_series(
-        latency_vec.iter().map(|(timestamp, latency, thread_id)| Circle::new((*timestamp, *latency), 2, &Palette99::pick(*thread_id as usize)))
+        latency_vec.iter().map(|(timestamp, latency, thread_id)| Circle::new((*timestamp, *latency), 1, &Palette99::pick(*thread_id as usize).filled()))
     ).unwrap();
 }
