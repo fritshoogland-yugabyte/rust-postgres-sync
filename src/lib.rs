@@ -695,6 +695,6 @@ fn draw_plot(latency_vec: Vec<(DateTime<Utc>,u64,i32)>, heading: &str) {
         .draw()
         .unwrap();
     context.draw_series(
-        latency_vec.iter().map(|(timestamp, latency, thread_id)| Circle::new((*timestamp, *latency), 1, &Palette99::pick(*thread_id as usize).filled()))
+        latency_vec.iter().map(|(timestamp, latency, thread_id)| Circle::new((*timestamp, *latency), 1, Palette99::pick(*thread_id as usize).filled()))
     ).unwrap();
 }
