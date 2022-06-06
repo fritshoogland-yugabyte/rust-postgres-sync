@@ -71,7 +71,7 @@ pub fn run(
                 run_truncate(connection);
                 println!(">> copy_mem");
                 let pool = connection_pool.clone();
-                let tp = rayon::ThreadPoolBuilder::new().num_threads(10).build().unwrap();
+                let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
                 let (tx_copy, rx_copy) = channel();
                 let mut histogram = Histogram::with_buckets(10);
                 let mut query_time: u64 = 0;
@@ -122,7 +122,7 @@ pub fn run(
                 run_truncate(connection);
                 println!(">> copy_file");
                 let pool = connection_pool.clone();
-                let tp = rayon::ThreadPoolBuilder::new().num_threads(10).build().unwrap();
+                let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
                 let (tx_copy, rx_copy) = channel();
                 let mut histogram = Histogram::with_buckets(10);
                 let mut query_time: u64 = 0;
@@ -174,7 +174,7 @@ pub fn run(
 
                 println!(">> insert");
                 let pool = connection_pool.clone();
-                let tp = rayon::ThreadPoolBuilder::new().num_threads(10).build().unwrap();
+                let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
                 let (tx_insert, rx_insert) = channel();
                 let mut histogram = Histogram::with_buckets(10);
                 let mut query_time: u64 = 0;
@@ -227,7 +227,7 @@ pub fn run(
 
                 println!(">> select");
                 let pool = connection_pool.clone();
-                let tp = rayon::ThreadPoolBuilder::new().num_threads(10).build().unwrap();
+                let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
                 let (tx_select, rx_select) = channel();
                 let mut histogram = Histogram::with_buckets(10);
                 let mut query_time: u64 = 0;
@@ -282,7 +282,7 @@ pub fn run(
 
                 println!(">> procedure");
                 let pool = connection_pool.clone();
-                let tp = rayon::ThreadPoolBuilder::new().num_threads(10).build().unwrap();
+                let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
                 let (tx_proc, rx_proc) = channel();
                 let mut histogram = Histogram::with_buckets(10);
                 let mut query_time: u64 = 0;
