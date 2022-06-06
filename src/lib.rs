@@ -260,7 +260,8 @@ pub fn run(
                 println!("threads         : {:12}", threads);
                 println!("nr queries      : {:12}", graph_data.iter().count());
                 println!("nr queries/thr. : {:12}", graph_data.iter().count() as f64/threads.to_f64().unwrap());
-                println!("avg query time  : {:12.6} us", graph_data.iter().map(|(_x, y, _z)| y.to_f64().unwrap()).sum::<f64>() / graph_data.iter().count() as f64);
+                println!("avg.wallclock/q : {:12.6} us", select_time as f64 / graph_data.iter().count() as f64);
+                println!("avg.time/query  : {:12.6} us", graph_data.iter().map(|(_x, y, _z)| y.to_f64().unwrap()).sum::<f64>() / graph_data.iter().count() as f64);
                 //println!("batch           : {:12}", batch_size);
                 //println!("total rows      : {:12}", rows * threads);
                 //println!("nontransactional: {:>12}", nontransactional);
