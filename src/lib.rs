@@ -222,8 +222,6 @@ pub fn run(
             },
             "select" => {
                 let connection_pool = connection_pool.clone();
-                //let connection = connection_pool.get().unwrap();
-                //run_truncate(connection);
 
                 println!(">> select");
                 let pool = connection_pool.clone();
@@ -273,6 +271,59 @@ pub fn run(
                 }
                 if graph {
                     draw_plot(graph_data, "select");
+                }
+            },
+            "update" => {
+                let connection_pool = connection_pool.clone();
+
+                println!(">> update");
+                let pool = connection_pool.clone();
+                let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
+                let (tx_update, rx_update) = channel();
+                let mut histogram = Histogram::with_buckets(10);
+                let mut query_time: u64 = 0;
+                let update_start_time = Instant::now();
+                tp.scope(move |s| {
+                    for thread_id in 0..threads {
+                        let connection = pool.get().unwrap();
+                        let tx_update = tx_update.clone();
+                        s.spawn(move |_| {
+                            let latencies = run_update(connection, rows, runtime_select, thread_id, no_prepared, text_fields_length);
+                            tx_update.send(latencies).unwrap();
+                        });
+                    }
+                });
+                let update_time = update_start_time.elapsed().as_micros();
+                let mut graph_data: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
+                for latency_vec in rx_update {
+                    for ( utc_time, latency, thread_id) in latency_vec {
+                        graph_data.push((utc_time, latency, thread_id));
+                        histogram.add(latency);
+                        query_time += latency;
+                    }
+                }
+                if show_rowsize {
+                    let connection = connection_pool.get().unwrap();
+                    run_show_rowsize(connection);
+                }
+                println!("wallclock time  : {:12.6} sec", update_time as f64 / 1000000.0);
+                println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/update_time as f64)*100.0);
+                println!("threads         : {:12}", threads);
+                println!("nr queries      : {:12}", graph_data.iter().count());
+                println!("nr queries/thr. : {:12.0}", graph_data.iter().count() as f64/threads.to_f64().unwrap());
+                println!("avg.wallclock/q : {:12.6} us", update_time as f64 / graph_data.iter().count() as f64);
+                println!("avg.time/query  : {:12.6} us", graph_data.iter().map(|(_x, y, _z)| y.to_f64().unwrap()).sum::<f64>() / graph_data.iter().count() as f64);
+                //println!("batch           : {:12}", batch_size);
+                //println!("total rows      : {:12}", rows * threads);
+                //println!("nontransactional: {:>12}", nontransactional);
+                println!("no_prepared     : {:>12}", no_prepared);
+                //println!("wallclock tm/row: {:12.6} us", select_time as f64 / (rows * threads).to_f64().unwrap());
+                //println!("db tm/row       : {:12.6} us", query_time as f64 / (rows * threads).to_f64().unwrap());
+                if print_histogram {
+                    println!("{}", histogram);
+                }
+                if graph {
+                    draw_plot(graph_data, "update");
                 }
             },
             "procedure" => {
@@ -509,6 +560,41 @@ pub fn run_select(
         let _f2: &str = result.get("f2");
         let _f3: &str = result.get("f3");
         let _f4: &str = result.get("f4");
+        query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap(), thread_id));
+    }
+
+    query_latencies
+}
+
+pub fn run_update(
+    mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>,
+    rows: i32,
+    runtime_update: i64,
+    thread_id: i32,
+    no_prepared: bool,
+    text_fields_length: i32,
+) -> Vec<(DateTime<Utc>,u64,i32)> {
+    let mut query_latencies: Vec<(DateTime<Utc>, u64, i32)> = Vec::new();
+
+    let update_statement = "update test_table set f1=$2, f2=$3, f3=$4, f4=$5 where id = $1";
+    let prepared_update_statement = connection.prepare(update_statement).unwrap();
+    let mut rng = rand::thread_rng();
+    let range = Uniform::from(0..rows);
+    let begin_time = Local::now();
+
+    loop {
+        if Local::now() >= begin_time.checked_add_signed(chrono::Duration::minutes(runtime_update)).unwrap() { break };
+        let query_start_time = Instant::now();
+        let number = range.sample(&mut rng);
+        let f1 = random_characters(text_fields_length);
+        let f2 = random_characters(text_fields_length);
+        let f3 = random_characters(text_fields_length);
+        let f4 = random_characters(text_fields_length);
+        let _result = if no_prepared {
+            connection.execute(update_statement, &[&number, &f1, &f2, &f3, &f4]).unwrap()
+        } else {
+            connection.execute(&prepared_update_statement, &[&number, &f1, &f2, &f3, &f4]).unwrap()
+        };
         query_latencies.push((Utc::now(), query_start_time.elapsed().as_micros().to_u64().unwrap(), thread_id));
     }
 
