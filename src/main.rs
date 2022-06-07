@@ -33,8 +33,8 @@ struct Opts {
     /// show the size of a row
     #[structopt(long)]
     show_rowsize: bool,
-    /// operations (copy_mem,copy_file,insert,procedure,select)
-    #[structopt(short, long, default_value = "copy_mem,copy_file,insert,procedure,select")]
+    /// operations (copy_mem,copy_file,insert,procedure,select,update)
+    #[structopt(short, long, default_value = "")]
     operations: String,
     /// number of tablets
     #[structopt(long, default_value = "3")]
