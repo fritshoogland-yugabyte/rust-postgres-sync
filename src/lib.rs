@@ -686,7 +686,10 @@ pub fn run_procedure(
 
 
 #[allow(dead_code)]
-fn create_connection(url: &str, cacert_file: &str) -> Client {
+fn create_connection(
+    url: &str,
+    cacert_file: &str,
+) -> Client {
     let connection = if url.contains("sslmode=require") {
         let tls = make_tls(cacert_file);
         Client::connect(url, tls).expect("failed to create tls postgres connection.")
