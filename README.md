@@ -169,3 +169,7 @@ The dots show the latency outliers. This scattergraph shows a trend in the outli
 
 ### histogram and scatterplot caveat
 For the load and query types where the SQL executes a single statement, the histogram and scatterplot will not show anything useful, because for the loading via the procedure, as well as the copy from file will execute a single command.
+
+# load balancing over YSQL nodes
+Rust does currently not have a native YugabyteDB adapter, and therefore relies on the postgres adapter for YSQL connections.  
+Because the postgres adapter does not have a native mechanism to distribute connections over multiple nodes, which is what YugabyteDB YSQL can greatly benefit from, at current the simplest way to still achieve using multiple YSQL instances in the cluster is to use haproxy.
