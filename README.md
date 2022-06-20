@@ -7,7 +7,7 @@ At current, it can perform the following scenario's:
 - perform loading dummy data using COPY FROM using a CSV file (copy-file operation).
 - perform loading dummy data using a procedure (procedure operation).
 - perform select statements that select all rows via a primary key lookup (select operation).
-- perform update statements that update all non PK fields via a primary key lookup.
+- perform update statements that update all non PK fields via a primary key lookup (update operation).
 
 For all scenario's:
 - the number of concurrent connections can be specified (threads).
@@ -173,3 +173,34 @@ For the load and query types where the SQL executes a single statement, the hist
 # load balancing over YSQL nodes
 Rust does currently not have a native YugabyteDB adapter, and therefore relies on the postgres adapter for YSQL connections.  
 Because the postgres adapter does not have a native mechanism to distribute connections over multiple nodes, which is what YugabyteDB YSQL can greatly benefit from, at current the simplest way to still achieve using multiple YSQL instances in the cluster is to use haproxy.
+
+# how to build
+
+In order to build nodetop from source using the rust compiler, the following RPMs need to be installed:
+(validated with Centos 7 and Alma 8)
+- git
+- cmake
+- gcc-c++
+- freetype-devel
+- expat-devel
+- open-sans-fonts
+- fontconfig-devel
+- openssl-devel
+
+Yum command for quick install of rpm packages:  
+`yum install -y git cmake gcc-c++ freetype-devel expat-devel open-sans-fonts fontconfig-devel openssl-devel`
+
+Install rust:
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+Clone this repository:
+```
+git clone https://github.com/fritshoogland-yugabyte/ysql-bench.git
+```
+Build ysql-bench in release mode:
+```
+cd ysql-bench
+cargo build --release
+```
+The executable is in target/release.
