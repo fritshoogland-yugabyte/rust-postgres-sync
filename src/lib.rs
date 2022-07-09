@@ -55,11 +55,12 @@ pub fn run(
     drop: bool,
     graph: bool,
     runtime_select: i64,
+    table_name: &str,
 ) {
     let connection_pool = create_pool(url, threads, cacert_file);
 
     let connection = connection_pool.get().unwrap();
-    run_create_table(connection, tablets, drop);
+    run_create_table(connection, tablets, drop, table_name);
     let connection = connection_pool.get().unwrap();
     run_create_procedure(connection);
 
@@ -68,7 +69,7 @@ pub fn run(
             "copy_mem" => {
                 let connection_pool = connection_pool.clone();
                 let connection = connection_pool.get().unwrap();
-                run_truncate(connection);
+                run_truncate(connection, table_name);
                 println!(">> copy_mem");
                 let pool = connection_pool.clone();
                 let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
@@ -81,7 +82,7 @@ pub fn run(
                         let connection = pool.get().unwrap();
                         let tx_copy = tx_copy.clone();
                         s.spawn(move |_| {
-                            let latencies_vec = run_copy_from(connection, rows, batch_size, thread_id, nontransactional, text_fields_length);
+                            let latencies_vec = run_copy_from(connection, rows, batch_size, thread_id, nontransactional, text_fields_length, table_name);
                             tx_copy.send(latencies_vec).unwrap();
                         });
                     }
@@ -97,7 +98,7 @@ pub fn run(
                 }
                 if show_rowsize {
                     let connection = connection_pool.get().unwrap();
-                    run_show_rowsize(connection);
+                    run_show_rowsize(connection, table_name);
                 }
                 println!("wallclock time  : {:12.6} sec", copy_time as f64 / 1000000.0);
                 println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/copy_time as f64)*100.0);
@@ -119,7 +120,7 @@ pub fn run(
             "copy_file" => {
                 let connection_pool = connection_pool.clone();
                 let connection = connection_pool.get().unwrap();
-                run_truncate(connection);
+                run_truncate(connection, table_name);
                 println!(">> copy_file");
                 let pool = connection_pool.clone();
                 let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
@@ -132,7 +133,7 @@ pub fn run(
                         let connection = pool.get().unwrap();
                         let tx_copy = tx_copy.clone();
                         s.spawn(move |_| {
-                            let latencies_vec = run_copy_file(connection, rows, batch_size, thread_id, nontransactional, text_fields_length, threads);
+                            let latencies_vec = run_copy_file(connection, rows, batch_size, thread_id, nontransactional, text_fields_length, threads, table_name);
                             tx_copy.send(latencies_vec).unwrap();
                         });
                     }
@@ -148,7 +149,7 @@ pub fn run(
                 }
                 if show_rowsize {
                     let connection = connection_pool.get().unwrap();
-                    run_show_rowsize(connection);
+                    run_show_rowsize(connection, table_name);
                 }
                 println!("wallclock time  : {:12.6} sec", copy_time as f64 / 1000000.0);
                 println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/copy_time as f64)*100.0);
@@ -170,7 +171,7 @@ pub fn run(
             "insert" => {
                 let connection_pool = connection_pool.clone();
                 let connection = connection_pool.get().unwrap();
-                run_truncate(connection);
+                run_truncate(connection, table_name);
 
                 println!(">> insert");
                 let pool = connection_pool.clone();
@@ -184,7 +185,7 @@ pub fn run(
                         let connection = pool.get().unwrap();
                         let tx_insert = tx_insert.clone();
                         s.spawn(move |_| {
-                            let latencies = run_insert(connection, rows, batch_size, thread_id, nontransactional, text_fields_length, no_prepared);
+                            let latencies = run_insert(connection, rows, batch_size, thread_id, nontransactional, text_fields_length, no_prepared, table_name);
                             tx_insert.send(latencies).unwrap();
                         });
                     }
@@ -200,7 +201,7 @@ pub fn run(
                 }
                 if show_rowsize {
                     let connection = connection_pool.get().unwrap();
-                    run_show_rowsize(connection);
+                    run_show_rowsize(connection, table_name);
                 }
                 println!("wallclock time  : {:12.6} sec", insert_time as f64 / 1000000.0);
                 println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/insert_time as f64)*100.0);
@@ -235,7 +236,7 @@ pub fn run(
                         let connection = pool.get().unwrap();
                         let tx_select = tx_select.clone();
                         s.spawn(move |_| {
-                            let latencies = run_select(connection, rows, runtime_select, thread_id, no_prepared);
+                            let latencies = run_select(connection, rows, runtime_select, thread_id, no_prepared, table_name);
                             tx_select.send(latencies).unwrap();
                         });
                     }
@@ -251,7 +252,7 @@ pub fn run(
                 }
                 if show_rowsize {
                     let connection = connection_pool.get().unwrap();
-                    run_show_rowsize(connection);
+                    run_show_rowsize(connection, table_name);
                 }
                 println!("wallclock time  : {:12.6} sec", select_time as f64 / 1000000.0);
                 println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/select_time as f64)*100.0);
@@ -288,7 +289,7 @@ pub fn run(
                         let connection = pool.get().unwrap();
                         let tx_update = tx_update.clone();
                         s.spawn(move |_| {
-                            let latencies = run_update(connection, rows, runtime_select, thread_id, no_prepared, text_fields_length);
+                            let latencies = run_update(connection, rows, runtime_select, thread_id, no_prepared, text_fields_length, table_name);
                             tx_update.send(latencies).unwrap();
                         });
                     }
@@ -304,7 +305,7 @@ pub fn run(
                 }
                 if show_rowsize {
                     let connection = connection_pool.get().unwrap();
-                    run_show_rowsize(connection);
+                    run_show_rowsize(connection, table_name);
                 }
                 println!("wallclock time  : {:12.6} sec", update_time as f64 / 1000000.0);
                 println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/update_time as f64)*100.0);
@@ -329,7 +330,7 @@ pub fn run(
             "procedure" => {
                 let connection_pool = connection_pool.clone();
                 let connection = connection_pool.get().unwrap();
-                run_truncate(connection);
+                run_truncate(connection, table_name);
 
                 println!(">> procedure");
                 let pool = connection_pool.clone();
@@ -359,7 +360,7 @@ pub fn run(
                 }
                 if show_rowsize {
                     let connection = connection_pool.get().unwrap();
-                    run_show_rowsize(connection);
+                    run_show_rowsize(connection, table_name);
                 }
                 println!("wallclock time  : {:12.6} sec", proc_time as f64 / 1000000.0);
                 println!("tot db time     : {:12.6} sec {:5.2} %", query_time as f64 / 1000000.0, (query_time as f64/proc_time as f64)*100.0);
@@ -380,26 +381,37 @@ pub fn run(
     }
 }
 
-fn run_create_table(mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>, tablets: i32, drop: bool) {
+fn run_create_table(
+    mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>,
+    tablets: i32,
+    drop: bool,
+    table_name: &str,
+) {
     if drop {
         println!(">> drop table");
-        let sql_statement = format!("drop table if exists test_table");
-        connection.simple_query(&sql_statement).expect("error during drop table if exists test_table");
+        let sql_statement = format!("drop table if exists {}", table_name);
+        connection.simple_query(&sql_statement).expect("error during drop table if exists");
     };
     println!(">> create table if not exists");
-    let sql_statement = format!("create table if not exists test_table( id int primary key, f1 text, f2 text, f3 text, f4 text) split into {} tablets", tablets);
-    connection.simple_query(&sql_statement).expect("error during create table if not exists test_table");
+    let sql_statement = format!("create table if not exists {}( id int primary key, f1 text, f2 text, f3 text, f4 text) split into {} tablets", table_name, tablets);
+    connection.simple_query(&sql_statement).expect("error during create table if not exists");
 }
 
-fn run_truncate(mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>) {
-    let sql_statement = "truncate table test_table";
-    connection.simple_query(sql_statement).expect("error during truncate");
+fn run_truncate(
+    mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>,
+    table_name: &str,
+) {
+    let sql_statement = format!("truncate table {}", table_name);
+    connection.simple_query(sql_statement.as_str()).expect("error during truncate");
     println!(">> truncate table");
 }
 
-fn run_show_rowsize(mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>) {
-    let sql_statement = "select case when exists (select * from test_table limit 1) then pg_column_size(test_table.*) else 0 end from test_table limit 1";
-    let row = connection.query_one(sql_statement, &[]).expect("error during select for table size");
+fn run_show_rowsize(
+    mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>,
+    table_name: &str,
+) {
+    let sql_statement = format!("select case when exists (select * from {} limit 1) then pg_column_size({}.*) else 0 end from {} limit 1", table_name, table_name, table_name);
+    let row = connection.query_one(sql_statement.as_str(), &[]).expect("error during select for table size");
     let val: i64 = row.get(0);
     println!("row size        : {:12} bytes", val);
 }
@@ -458,6 +470,7 @@ pub fn run_insert(
     nontransactional: bool,
     text_fields_length: i32,
     no_prepared: bool,
+    table_name: &str,
 ) -> Vec<(DateTime<Utc>,u64,i32)> {
     let mut query_latencies: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
     let start_id = rows * thread_id;
@@ -469,7 +482,7 @@ pub fn run_insert(
         connection.simple_query("set yb_disable_transactional_writes=off").expect("error in setting yb_disable_transactional_writes to off");
     }
 
-    let base_insert = "insert into test_table (id,f1,f2,f3,f4) values";
+    let base_insert = format!("insert into {} (id,f1,f2,f3,f4) values", table_name);
     let mut fields = String::from("");
     for fields_nr in 0..values_batch {
         fields.push_str(format!("(${},${},${},${},${}),", (fields_nr*5)+1,(fields_nr*5)+2,(fields_nr*5)+3,(fields_nr*5)+4,(fields_nr*5)+5).as_str());
@@ -535,13 +548,14 @@ pub fn run_select(
     runtime_select: i64,
     thread_id: i32,
     no_prepared: bool,
+    table_name: &str,
 ) -> Vec<(DateTime<Utc>,u64,i32)> {
     let mut query_latencies: Vec<(DateTime<Utc>, u64, i32)> = Vec::new();
     //let start_id = rows * thread_id;
     //let end_id = start_id + rows - 1;
 
-    let select_statement = "select f1, f2, f3, f4 from test_table where id = $1";
-    let prepared_select_statement = connection.prepare(select_statement).unwrap();
+    let select_statement = format!("select f1, f2, f3, f4 from {} where id = $1", table_name);
+    let prepared_select_statement = connection.prepare(select_statement.as_str()).unwrap();
     let mut rng = rand::thread_rng();
     let range = Uniform::from(0..rows);
     let begin_time = Local::now();
@@ -552,7 +566,7 @@ pub fn run_select(
         //dbg!(rows);
         let number = range.sample(&mut rng);
         let result = if no_prepared {
-            connection.query_one(select_statement, &[&number]).unwrap()
+            connection.query_one(select_statement.as_str(), &[&number]).unwrap()
         } else {
             connection.query_one(&prepared_select_statement, &[&number]).unwrap()
         };
@@ -573,11 +587,12 @@ pub fn run_update(
     thread_id: i32,
     no_prepared: bool,
     text_fields_length: i32,
+    table_name: &str,
 ) -> Vec<(DateTime<Utc>,u64,i32)> {
     let mut query_latencies: Vec<(DateTime<Utc>, u64, i32)> = Vec::new();
 
-    let update_statement = "update test_table set f1=$2, f2=$3, f3=$4, f4=$5 where id = $1";
-    let prepared_update_statement = connection.prepare(update_statement).unwrap();
+    let update_statement = format!("update {} set f1=$2, f2=$3, f3=$4, f4=$5 where id = $1", table_name);
+    let prepared_update_statement = connection.prepare(update_statement.as_str()).unwrap();
     let mut rng = rand::thread_rng();
     let range = Uniform::from(0..rows);
     let begin_time = Local::now();
@@ -591,7 +606,7 @@ pub fn run_update(
         let f3 = random_characters(text_fields_length);
         let f4 = random_characters(text_fields_length);
         let _result = if no_prepared {
-            connection.execute(update_statement, &[&number, &f1, &f2, &f3, &f4]).unwrap()
+            connection.execute(update_statement.as_str(), &[&number, &f1, &f2, &f3, &f4]).unwrap()
         } else {
             connection.execute(&prepared_update_statement, &[&number, &f1, &f2, &f3, &f4]).unwrap()
         };
@@ -608,6 +623,7 @@ pub fn run_copy_from(
     thread_id: i32,
     nontransactional: bool,
     text_fields_length: i32,
+    table_name: &str,
 ) -> Vec<(DateTime<Utc>,u64, i32)> {
     let mut query_latencies: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
     let start_id = rows * thread_id;
@@ -619,7 +635,7 @@ pub fn run_copy_from(
         connection.simple_query("set yb_disable_transactional_writes=off").expect("error in setting yb_disable_transactional_writes to off");
     }
 
-    let mut writer = connection.copy_in("copy test_table from stdin").expect("error in performing copy_in");
+    let mut writer = connection.copy_in(format!("copy {} from stdin", table_name).as_str()).expect("error in performing copy_in");
     for nr in (start_id..end_id).step_by(values_batch.try_into().unwrap()) {
         let mut row = String::from("");
         for value_nr in 0..values_batch {
@@ -644,6 +660,7 @@ pub fn run_copy_file(
     nontransactional: bool,
     text_fields_length: i32,
     threads: i32,
+    table_name: &str,
 ) -> Vec<(DateTime<Utc>,u64, i32)> {
     let mut query_latencies: Vec<(DateTime<Utc>,u64,i32)> = Vec::new();
 
@@ -653,7 +670,7 @@ pub fn run_copy_file(
         connection.simple_query("set yb_disable_transactional_writes=off").expect("error in setting yb_disable_transactional_writes to off");
     }
 
-    let sql_statement = format!("copy test_table from '/tmp/ysql_bench-t{}-r{}-f{}--nr{}.csv' with (format csv)",threads,rows,text_fields_length,thread_id+1);
+    let sql_statement = format!("copy {} from '/tmp/ysql_bench-t{}-r{}-f{}--nr{}.csv' with (format csv)",table_name, threads, rows, text_fields_length, thread_id+1);
 
     let query_start_time = Instant::now();
     connection.simple_query(&sql_statement).expect("error during copy from file");
@@ -700,14 +717,20 @@ fn create_connection(
 }
 
 #[allow(dead_code)]
-fn make_tls(cacert_file: &str) -> MakeTlsConnector {
+fn make_tls(
+    cacert_file: &str
+) -> MakeTlsConnector {
     let mut builder = SslConnector::builder(SslMethod::tls()).expect("unable to create sslconnector builder");
     builder.set_ca_file(cacert_file).expect("unable to load ca.cert");
     builder.set_verify(SslVerifyMode::NONE);
     MakeTlsConnector::new(builder.build())
 }
 
-pub fn create_pool(url: &str, pool_size: i32, cacert_file: &str) -> Pool<PostgresConnectionManager<MakeTlsConnector>> {
+pub fn create_pool(
+    url: &str,
+    pool_size: i32,
+    cacert_file: &str
+) -> Pool<PostgresConnectionManager<MakeTlsConnector>> {
 
        let mut builder = SslConnector::builder(SslMethod::tls()).expect("unable to create sslconnector builder");
 

@@ -6,6 +6,7 @@ use std::{env, process, fs};
 use std::io::Write;
 
 const URL: &str = "host=192.168.66.80 port=5433 sslmode=disable user=yugabyte password=yugabyte";
+const TABLE_NAME: &str = "test_table";
 
 #[derive(Debug, StructOpt)]
 struct Opts {
@@ -54,6 +55,9 @@ struct Opts {
     /// runtime for select in minutes
     #[structopt(long, default_value = "30")]
     runtime_select: i64,
+    /// table name to use
+    #[structopt(long, default_value = TABLE_NAME)]
+    table_name: String,
 }
 
 fn main() {
@@ -90,6 +94,7 @@ fn main() {
     let no_prepared = options.no_prepared as bool;
     let drop = options.drop as bool;
     let graph = options.graph as bool;
+    let table_name = &options.table_name as &str;
     run(
         cacert_file,
         text_fields_length,
@@ -106,6 +111,7 @@ fn main() {
         drop,
         graph,
         runtime_select,
+        table_name,
     );
 
     if changed_options.len() > 0 {
