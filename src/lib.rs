@@ -56,6 +56,7 @@ pub fn run(
     graph: bool,
     runtime_select: i64,
     table_name: &str,
+    histogram_buckets: u64,
 ) {
     let connection_pool = create_pool(url, threads, cacert_file);
 
@@ -74,7 +75,7 @@ pub fn run(
                 let pool = connection_pool.clone();
                 let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
                 let (tx_copy, rx_copy) = channel();
-                let mut histogram = Histogram::with_buckets(10);
+                let mut histogram = Histogram::with_buckets(histogram_buckets);
                 let mut query_time: u64 = 0;
                 let copy_start_time = Instant::now();
                 tp.scope(move |s| {
@@ -125,7 +126,7 @@ pub fn run(
                 let pool = connection_pool.clone();
                 let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
                 let (tx_copy, rx_copy) = channel();
-                let mut histogram = Histogram::with_buckets(10);
+                let mut histogram = Histogram::with_buckets(histogram_buckets);
                 let mut query_time: u64 = 0;
                 let copy_start_time = Instant::now();
                 tp.scope(move |s| {
@@ -177,7 +178,7 @@ pub fn run(
                 let pool = connection_pool.clone();
                 let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
                 let (tx_insert, rx_insert) = channel();
-                let mut histogram = Histogram::with_buckets(10);
+                let mut histogram = Histogram::with_buckets(histogram_buckets);
                 let mut query_time: u64 = 0;
                 let insert_start_time = Instant::now();
                 tp.scope(move |s| {
@@ -228,7 +229,7 @@ pub fn run(
                 let pool = connection_pool.clone();
                 let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
                 let (tx_select, rx_select) = channel();
-                let mut histogram = Histogram::with_buckets(10);
+                let mut histogram = Histogram::with_buckets(histogram_buckets);
                 let mut query_time: u64 = 0;
                 let select_start_time = Instant::now();
                 tp.scope(move |s| {
@@ -281,7 +282,7 @@ pub fn run(
                 let pool = connection_pool.clone();
                 let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
                 let (tx_update, rx_update) = channel();
-                let mut histogram = Histogram::with_buckets(10);
+                let mut histogram = Histogram::with_buckets(histogram_buckets);
                 let mut query_time: u64 = 0;
                 let update_start_time = Instant::now();
                 tp.scope(move |s| {
@@ -336,7 +337,7 @@ pub fn run(
                 let pool = connection_pool.clone();
                 let tp = rayon::ThreadPoolBuilder::new().num_threads(threads.try_into().unwrap()).build().unwrap();
                 let (tx_proc, rx_proc) = channel();
-                let mut histogram = Histogram::with_buckets(10);
+                let mut histogram = Histogram::with_buckets(histogram_buckets);
                 let mut query_time: u64 = 0;
                 let proc_start_time = Instant::now();
                 tp.scope(move |s| {
@@ -393,7 +394,8 @@ fn run_create_table(
         connection.simple_query(&sql_statement).expect("error during drop table if exists");
     };
     println!(">> create table if not exists");
-    let sql_statement = format!("create table if not exists {}( id int primary key, f1 text, f2 text, f3 text, f4 text) split into {} tablets", table_name, tablets);
+    println!("create table if not exists {} ( id int primary key, f1 text, f2 text, f3 text, f4 text) split into {} tablets", table_name, tablets);
+    let sql_statement = format!("create table if not exists {} ( id int primary key, f1 text, f2 text, f3 text, f4 text) split into {} tablets", table_name, tablets);
     connection.simple_query(&sql_statement).expect("error during create table if not exists");
 }
 
@@ -410,7 +412,7 @@ fn run_show_rowsize(
     mut connection: PooledConnection<PostgresConnectionManager<MakeTlsConnector>>,
     table_name: &str,
 ) {
-    let sql_statement = format!("select case when exists (select * from {} limit 1) then pg_column_size({}.*) else 0 end from {} limit 1", table_name, table_name, table_name);
+    let sql_statement = format!("select case when exists (select * from {} limit 1) then pg_column_size({}.*)::int8 else 0 end from {} limit 1", table_name, table_name, table_name);
     let row = connection.query_one(sql_statement.as_str(), &[]).expect("error during select for table size");
     let val: i64 = row.get(0);
     println!("row size        : {:12} bytes", val);

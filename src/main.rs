@@ -58,6 +58,9 @@ struct Opts {
     /// table name to use
     #[structopt(long, default_value = TABLE_NAME)]
     table_name: String,
+    /// number of buckets for histogram
+    #[structopt(long, default_value = "10")]
+    histogram_buckets: u64,
 }
 
 fn main() {
@@ -91,6 +94,7 @@ fn main() {
     let show_rowsize = options.show_rowsize as bool;
     let operations = &options.operations as &str;
     let tablets = options.tablets as i32;
+    let histogram_buckets = options.histogram_buckets as u64;
     let no_prepared = options.no_prepared as bool;
     let drop = options.drop as bool;
     let graph = options.graph as bool;
@@ -112,6 +116,7 @@ fn main() {
         graph,
         runtime_select,
         table_name,
+        histogram_buckets,
     );
 
     if changed_options.len() > 0 {
